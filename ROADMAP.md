@@ -1,0 +1,133 @@
+# FAM Roadmap
+
+Source of truth for phased development. Phases are executed in order unless
+noted; each phase ships tests alongside implementation. Locked policy
+decisions are marked LOCKED and must not be changed without the owner's
+sign-off.
+
+## Completed
+
+### Phase 0 — Foundation
+- Format versioning (`src/utils/versioning.ts`): every persisted/wire format
+  carries `version` = FAM semver; legacy (no version) = compatible; newer =
+  rejected (`UnsupportedFormatVersionError`). Applied to: EncryptedKeyFile,
+  message ciphertext envelope, credentials.json, all WS frames.
+- Send-path deduplication: `MessageSendService` is the single authoritative
+  path for DM + channel sends (HTTP and WS both delegate). Rate limiting
+  stays transport-level.
+- Migration framework: `SCHEMA_SQL` frozen as v1 baseline; versioned
+  `MIGRATIONS` registry with per-step transactions.
+
+### Phase 1 — Permissions & Grants (LOCKED policy)
+- Cross-account DMs: default-DENY; require active grant (target's account is
+  grantor, sender's account is grantee, per target entity). Deny rules
+  override grants. Grant `capabilities.can_send === false` blocks.
+- Same-account DMs: default-ALLOW; explicit deny rules revoke.
+- Channel sends: membership implies allow; persistence never blocked; deny
+  rules filter pushes per member only. Most-specific rule wins.
+- Admin API (`/admin/api/*`) with account-token auth: grants
+  create/list/revoke, permission rules create/list/delete, ownership checks.
+- Channel bans retired entirely (moderation = kick + set-role).
+
+### Hardening Sprint (post-audit)
+- `getById` decrypts; `getByIdRaw` for metadata-only callers.
+- Admin routes parse body once; shared DB context in WS upgrade; MCP server
+  uses shared versioned credential loader.
+- Migration v4: permissions table rebuilt with CHECK constraints (rule-shape
+  hygiene); legacy ambiguous rows normalized on upgrade.
+- ISO-8601 vs SQLite datetime comparison fixed in grants/invitations expiry.
+- Encryption-mode startup warning; WS inbound frame version validation;
+  batch ownership validation in `/messages/delivered`.
+
+### Phase 2 — Availability Toggle (LOCKED semantics)
+- `entities.availability` (user intent) separate from connection-derived
+  `status`. `unavailable` = all pushes suppressed, messages queue silently.
+- Flip back to `available` = queued backlog pushed immediately (client still
+  acks via `/messages/delivered`; at-least-once).
+- `POST /entities/availability` (session-authenticated); availability frame
+  broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
+
+## Remaining
+
+### Phase 3 — Directory Scoping (in progress)
+- `/entities/list scope: 'directory'`: caller sees own account's entities +
+  entities actively granted to their account. `scope: 'all'` unchanged.
+- Repo method `getDirectoryForAccount(accountId)`.
+- Admin API: list directory for an account (feeds Phase 4 UI).
+
+### Phase 4 — Admin Website
+- Migration v6: `admin_sessions` table (id, account_id, created_at,
+  expires_at, csrf_token).
+- Cookie + CSRF auth middleware reusing existing OAuth account login.
+- React SPA served from the same Bun.serve at `/admin/*` (HTML imports,
+  no vite): entity CRUD, grants UI, permission matrix UI, availability
+  toggle, directory view.
+
+### Phase 5 — Versioning Completion / Key Rotation
+- `key_id` in the versioned ciphertext envelope; HKDF salt per key version.
+- Key rotation CLI (`fam key rotate`) + migration to re-encrypt existing rows.
+- WS envelope: client sends `version` on connect; reject newer-than-server.
+- Document rotation procedure (current guidance: don't rotate; messages
+  become undecryptable).
+
+### Phase 6 — Test Backlog & Data-Model Fixes
+- Per-recipient channel message delivery tracking: the single
+  `messages.delivered` flag is shared across ALL channel recipients — when
+  one member acks (or one member's undelivered fetch returns it), other
+  members (e.g. paused/unavailable ones) can no longer see the message as
+  undelivered. Requires a new table (e.g. `message_deliveries`:
+  message_id × recipient_entity_id, delivered flag per row) plus migration
+  backfilling from existing DM flags. Also affects: availability flush for
+  channel messages, `/messages/delivered` acks, `getUndelivered` fan-out.
+- Encryption toggle tests (enable/disable over existing data).
+- MCP reconnect flows (server restart, undelivered delivery, fatal-error
+  handling on revoked/deleted entity — stop reconnecting on 404/401).
+- Admin edge cases: grant revocation during active DM, concurrent admin ops.
+- Migration matrix: fresh → current, each older version → current.
+- Availability + directory scoping coverage.
+
+### Phase 6b — Findings from operating claude-peers at scale
+
+Derived from four days of field data across 17-18 concurrent agents (portfolio
+PM session, 2026-08-19). These are failure modes observed in production on the
+predecessor system, not speculative hardening. Ordered by measured impact.
+
+- **Delivery state in the send response.** Highest value of the four. Sending
+  to an offline or `unavailable` entity currently returns `201 + message_id`:
+  persisted, queued, and indistinguishable from delivered. The server already
+  knows the answer and does not tell the sender. Field data: of 12 peers pinged
+  in one window, 4 replied; the other 8 were busy, stopped, or never going to
+  answer, and the sender could not tell which. Return recipient `status` +
+  `availability` so the sender can distinguish *connected-and-available*
+  (busy, likely to answer) from *declared-unavailable* (don't wait) from
+  *offline-queued* (will see it on reconnect). Ship with the caveat that
+  availability is honest-broadcast, not enforced truth — it reports what a peer
+  declared, not whether it will reply. Generalized rule: **any outcome that is
+  not delivery must be legible to the sender.**
+- **Free-text summary field on entities.** Regression vs claude-peers, which has
+  `set_summary`. `display_name` + `capabilities` describe identity but not
+  current intent, and intent is what routing actually needs. Field data: of 17
+  peers, the 5 with summaries were the only ones routable without broadcasting;
+  one summary was the sole reason a project stayed reachable across a four-day
+  gap.
+- **Staleness stamps on summaries.** `last_seen` is already recorded, so
+  rendering "set 4d ago" beside a summary is nearly free. Observed harm: a
+  four-day-old summary read as current caused one project to conclude another
+  was blocked on work that had already shipped, and act on it. The fix moves the
+  discount from something a reader must remember to something they cannot avoid
+  seeing.
+- **Adapter-populated context bag for framework-local identity.** FAM correctly
+  has no `cwd`/repo concept — those do not belong in a federation protocol — but
+  dropping them cost collision detection that claude-peers had via `from_cwd`.
+  Observed harm: two sessions sharing one checkout, mutually invisible, both
+  claiming authorship of the same three commits; the network held both `cwd`
+  values throughout and had no way to say so. 9 of 18 sessions were sharing a
+  checkout with at least one sibling. Let adapters populate a namespaced context
+  blob (the MCP adapter supplies cwd/git root) that the directory can surface
+  and collision-check, without the core schema learning about filesystems.
+
+Cross-cutting instrumentation note: **count near-misses, not just failures.** A
+directory lookup that returns "no such entity" is a caught error and must be
+logged as one. Observed rate of a failure mode under-samples it in proportion to
+how disciplined the surrounding population is, so a low rate in the wild is
+evidence of careful operators rather than a healthy protocol.

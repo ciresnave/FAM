@@ -17,6 +17,37 @@ routes trust a body-supplied `entity_id`. There is also a cross-provider account
 takeover path in the OAuth callback, and no local bootstrap (OAuth is the only
 way to create an account). Do not describe FAM as working end to end.
 
+## Repositories and remotes — READ BEFORE PUSHING
+
+Two checkouts on this machine share ancestry, and their remote naming differs.
+`origin` does NOT mean the same thing in both. This has caused two near-misses;
+check `git remote -v` before any push you have not made before.
+
+**`C:\Projects\fam` — this repo, FAM.**
+
+| Remote | Target | Notes |
+| --- | --- | --- |
+| `origin` | `ciresnave/FAM` | Canonical. Push here. |
+| `claude-peers-mcp` | `ciresnave/claude-peers-mcp` | Pre-rename fork, superseded. Slated for deletion. |
+
+**`~/claude-peers-mcp` — the claude-peers broker checkout (separate clone).**
+
+| Remote | Target | Notes |
+| --- | --- | --- |
+| `origin` | `louislva/claude-peers-mcp` | **UPSTREAM — a third party's repository. Never push here.** |
+| `fork` | `ciresnave/claude-peers-mcp` | Superseded, slated for deletion. |
+| `fam` | `ciresnave/FAM` | Where broker work is archived. |
+
+`origin` pointing upstream is conventional for a fork and is correct there — the
+hazard is that it differs between the two trees, so a bare `git push` in the
+broker checkout targets someone else's project. Push explicitly by remote name
+in `~/claude-peers-mcp`.
+
+The broker branches `fix/preserve-undelivered-messages` (the code currently
+running) and `fix/cross-platform-support` (its rollback target) are archived on
+`ciresnave/FAM` so the pending deletion of `ciresnave/claude-peers-mcp` cannot
+destroy them.
+
 ## Architecture — FAM (`src/`)
 
 - `src/db/` — SQLite schema, versioned migrations, repositories. `SCHEMA_SQL` is

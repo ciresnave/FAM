@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/nemotron-3-ultra-free",
+  "agent": {
+    "planner": {
+      "model": "opencode/nemotron-3-ultra-free",
+      "mode": "subagent",
+      "description": "Deep planning agent for FAM architecture design with 1M context window"
+    }
+  }
+}

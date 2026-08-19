@@ -1,15 +1,18 @@
 {
-  "name": "claude-peers",
+  "name": "fam",
   "version": "0.1.0",
-  "description": "Peer discovery and messaging for Claude Code instances",
+  "description": "Federated Agent Messaging - Agent-framework-agnostic messaging for agents, humans, and tools",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "license": "MIT",
   "scripts": {
+    "dev": "bun run src/server/http.ts",
+    "start": "bun run src/server/http.ts",
     "broker": "bun broker.ts",
     "server": "bun server.ts",
-    "test": "bun test"
+    "test": "bun test --timeout 60000",
+    "typecheck": "bun run tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -18,6 +21,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@noble/hashes": "^2.3.0"
   }
 }

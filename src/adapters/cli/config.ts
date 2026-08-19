@@ -1,6 +1,6 @@
 // CLI Configuration and Credential Management
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import { stampVersion, assertFormatSupported } from '../../utils/versioning';
@@ -103,8 +103,21 @@ export async function getActiveEntityCredentials(path?: string): Promise<EntityC
  * Save credentials to disk.
  */
 export async function saveCredentials(credentials: StoredCredentials): Promise<void> {
-  await mkdir(FAM_DIR, { recursive: true });
-  await writeFile(CREDENTIALS_FILE, JSON.stringify(stampVersion(credentials), null, 2), 'utf-8');
+  // This file holds the account token and every entity's encrypted key file —
+  // owner-only, never group- or world-readable.
+  await mkdir(FAM_DIR, { recursive: true, mode: 0o700 });
+  await writeFile(CREDENTIALS_FILE, JSON.stringify(stampVersion(credentials), null, 2), {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
+
+  // `mode` on mkdir/writeFile only applies when the path is CREATED; an
+  // existing directory or file keeps whatever mode it already had. chmod
+  // unconditionally so credentials written by an earlier version get tightened
+  // on the next save rather than staying world-readable forever.
+  // Windows implements only the read-only bit, so this is a near no-op there.
+  await chmod(FAM_DIR, 0o700);
+  await chmod(CREDENTIALS_FILE, 0o600);
 }
 
 /**

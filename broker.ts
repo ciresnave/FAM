@@ -84,7 +84,26 @@ function cleanStalePeers() {
   for (const peer of peers) {
     if (!isProcessAlive(peer.pid)) {
       db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
-      db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
+      // Deliberately do NOT delete this peer's undelivered messages.
+      //
+      // /send-message returns { ok: true } as soon as the row is inserted, so
+      // the sender already holds positive evidence of success. Deleting here
+      // destroys the message silently and the loss is undetectable from the
+      // sender's side — an ack that does not mean delivery. That is the worst
+      // shape a messaging failure can take, and it is invisible precisely
+      // because nothing bounces.
+      //
+      // This was survivable while every peer was a long-lived Claude Code
+      // session. It stops being survivable for process-per-task local agents,
+      // which restart constantly: the workload that makes eviction common is
+      // exactly the workload being added.
+      //
+      // Retaining the rows does not by itself deliver them — handleRegister
+      // mints a fresh random id on re-registration, so a restarted peer comes
+      // back under a different identity and never polls for these. The rows are
+      // preserved as evidence rather than destroyed as garbage. Durable
+      // identity is the actual fix, and is what FAM's `name@account` model
+      // exists to provide.
     }
   }
 }

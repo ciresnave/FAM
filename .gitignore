@@ -32,3 +32,18 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# FAM runtime database (default path is ~/.fam.db, but guard local copies too)
+*.db
+*.db-wal
+*.db-shm
+
+# Agent tooling: opencode workspace (vendors its own node_modules, ~61MB)
+.opencode/
+
+# Vendored supertool binary (~540KB, not source)
+supertool
+
+# Claude Code local settings and session memory
+.claude/settings.local.json
+.remember/

@@ -628,7 +628,7 @@ const mcp = new Server(
 ### Directory Structure for FAM
 
 ```
-claude-peers-mcp/
+fam/
 ├── src/
 │   ├── db/
 │   │   ├── schema.ts          # SQLite schema + migrations

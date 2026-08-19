@@ -1,13 +1,19 @@
 /**
- * claude-peers
+ * FAM — Federated Agent Messaging
  *
- * Peer discovery and messaging for Claude Code instances.
+ * Agent-framework-agnostic messaging for agents, humans, and tools.
  *
- * This package has two entry points:
- *   - server.ts  — MCP server (spawned by Claude Code, one per instance)
- *   - broker.ts  — Shared broker daemon (auto-launched, one per machine)
+ * Entry points:
+ *   - src/server/http.ts          — FAM server (HTTP + WebSocket)
+ *   - src/adapters/mcp/server.ts  — FAM MCP adapter (one per agent instance)
+ *   - src/adapters/cli/main.ts    — FAM CLI
  *
- * See README.md for setup and usage.
+ * The legacy claude-peers entry points are retained alongside during the
+ * transition and are what currently carries real traffic:
+ *   - server.ts  — claude-peers MCP server
+ *   - broker.ts  — claude-peers broker daemon
+ *
+ * See README.md for setup, DESIGN.md for architecture, ROADMAP.md for status.
  */
 
-export { } // module marker
+export {}; // module marker

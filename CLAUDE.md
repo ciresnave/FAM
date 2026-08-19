@@ -4,28 +4,60 @@ globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
 alwaysApply: false
 ---
 
-# claude-peers
+# FAM — Federated Agent Messaging
 
-Peer discovery and messaging MCP channel for Claude Code instances.
+Agent-framework-agnostic messaging for agents, humans, and tools. A fork of
+`claude-peers-mcp` by Louis Arge, substantially rewritten. See `DESIGN.md` for
+architecture and `ROADMAP.md` for phased status — ROADMAP.md is the source of
+truth for what is done and what is not.
 
-## Architecture
+**Pre-alpha. Not deployable.** Authentication is implemented but NOT enforced on
+`/messages/*`, `/channels/*`, `/entities/list` or `/entities/status` — those
+routes trust a body-supplied `entity_id`. There is also a cross-provider account
+takeover path in the OAuth callback, and no local bootstrap (OAuth is the only
+way to create an account). Do not describe FAM as working end to end.
 
-- `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server.
-- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications.
-- `shared/types.ts` — Shared TypeScript types for broker API.
-- `shared/summarize.ts` — Auto-summary generation via gpt-5.4-nano.
-- `cli.ts` — CLI utility for inspecting broker state.
+## Architecture — FAM (`src/`)
+
+- `src/db/` — SQLite schema, versioned migrations, repositories. `SCHEMA_SQL` is
+  the frozen v1 baseline; post-v1 changes go in the `MIGRATIONS` registry, never
+  by editing the baseline.
+- `src/crypto/` — Ed25519 keys, Argon2id + AES-256-GCM key files, nonce
+  challenge-response, optional message encryption at rest.
+- `src/auth/` — OAuth 2.0 (Google, GitHub), HMAC token hashing.
+- `src/server/` — `Bun.serve()` HTTP + WebSocket, rate limiting, permission
+  matrix, cross-account grants. `MessageSendService` is the single authoritative
+  send path — HTTP and WebSocket both delegate to it, so put enforcement there
+  rather than in a route.
+- `src/adapters/mcp/` — MCP stdio server, pushes via `notifications/claude/channel`.
+- `src/adapters/cli/` — CLI client.
+
+Identity is `name@account` and durable across restarts; sessions are ephemeral
+and separate. `availability` (declared intent) is distinct from `status`
+(connection-derived). Preserve that separation.
+
+## Architecture — claude-peers (legacy, still working)
+
+Retained side by side during the transition. This is what currently carries
+real traffic; do not delete it.
+
+- `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite.
+- `server.ts` — MCP stdio server, one per Claude Code instance.
+- `shared/` — Shared types and auto-summary generation.
+- `cli.ts` — CLI for inspecting broker state.
+
+Note FAM also defaults to port 7899, so the two cannot run simultaneously.
 
 ## Running
 
 ```bash
-# Start Claude Code with the channel:
-claude --dangerously-load-development-channels server:claude-peers
+# FAM server (needs FAM_SERVER_SECRET; see .env.example):
+bun run dev
 
-# Or just add to .mcp.json and use as regular MCP (no channel push, but tools work):
-# { "claude-peers": { "command": "bun", "args": ["./server.ts"] } }
+# FAM MCP adapter:
+# { "fam": { "command": "bun", "args": ["./src/adapters/mcp/server.ts"] } }
 
-# CLI:
+# Legacy claude-peers CLI:
 bun cli.ts status
 bun cli.ts peers
 bun cli.ts send <peer-id> <message>
@@ -56,7 +88,12 @@ Default to using Bun instead of Node.js.
 
 ## Testing
 
-Use `bun test` to run tests.
+Run tests with `bun run test`, **not** `bun test`.
+
+Bun does not honour the `[test] timeout` key in `bunfig.toml`, so three
+integration tests exceed the 5-second default and fail under bare `bun test`.
+The `test` script passes `--timeout 60000` explicitly. A bare `bun test` will
+show 3 spurious failures; that is the harness, not a regression.
 
 ```ts#index.test.ts
 import { test, expect } from "bun:test";

@@ -3,6 +3,90 @@
 // Supports Google and GitHub as identity providers.
 
 import { hashSha256 } from '../crypto/keys';
+import type { DatabaseContext } from '../db/transaction';
+import type { Account } from '../types';
+import { AccountProviderMismatchError, UnverifiedEmailError } from '../types/errors';
+
+// ============================================================================
+// Account Identity Resolution
+// ============================================================================
+
+/**
+ * Pick the address the provider has actually verified.
+ *
+ * FAM derives the account id from this address, so an unverified one is an
+ * attacker-controlled string. GitHub's `/user` endpoint returns the user's
+ * PUBLIC PROFILE email — a free-text field the user sets and GitHub never
+ * verifies — so it is ignored entirely in favour of `/user/emails`.
+ *
+ * Throws rather than falling back. There is no safe default here: the previous
+ * `${login}@github.com` fallback minted an address in a domain nobody controls.
+ */
+export function selectVerifiedEmail(
+  provider: 'google' | 'github',
+  profile: Record<string, any>,
+  emails?: Array<{ email?: string; primary?: boolean; verified?: boolean }>
+): string {
+  if (provider === 'google') {
+    // oauth2/v2/userinfo spells it `verified_email`; the OIDC userinfo endpoint
+    // spells it `email_verified`. Accept either so swapping endpoints cannot
+    // silently turn the check off.
+    const verified = profile.verified_email ?? profile.email_verified;
+    if (verified !== true && verified !== 'true') {
+      throw new UnverifiedEmailError('Google');
+    }
+    if (!profile.email) throw new UnverifiedEmailError('Google');
+    return String(profile.email);
+  }
+
+  const candidates = emails ?? [];
+  const verified = candidates.filter((e) => e.verified === true && e.email);
+  // Prefer the primary address; fall back to any verified one so a user whose
+  // primary is unverified can still sign in with an address they do own.
+  const chosen = verified.find((e) => e.primary === true) ?? verified[0];
+  if (!chosen?.email) throw new UnverifiedEmailError('GitHub');
+  return String(chosen.email);
+}
+
+/**
+ * Resolve the account for a provider identity, creating it on first sight.
+ *
+ * Resolution is by (provider, provider_account_id) — the provider's own stable
+ * user id, which the user cannot choose — NOT by email. Matching on email alone
+ * meant anyone who could present the same email string at any provider claimed
+ * the account, and GitHub profile emails are freely settable.
+ *
+ * Throws AccountProviderMismatchError when the email belongs to an account
+ * owned by a different provider identity.
+ */
+export function resolveAccountForProvider(
+  ctx: DatabaseContext,
+  provider: 'google' | 'github',
+  providerAccountId: string,
+  email: string,
+  displayName?: string
+): Account {
+  // 1. Authoritative lookup. Also means an email change at the provider keeps
+  //    the same account rather than silently creating a second one.
+  const bound = ctx.accounts.getByProviderIdentity(provider, providerAccountId);
+  if (bound) return bound;
+
+  // 2. No account for this provider identity. If the address already belongs to
+  //    someone, it is not ours to take.
+  const existing = ctx.accounts.getById(email);
+  if (existing) {
+    if (existing.provider || existing.provider_account_id) {
+      // Owned by a different provider identity — step 1 would have matched.
+      throw new AccountProviderMismatchError(email);
+    }
+    // Unbound pre-v6 row: adopt on first authenticated login. No such rows
+    // exist in any deployed database; this only covers upgrade-in-place.
+    ctx.accounts.bindProvider(email, provider, providerAccountId);
+    return ctx.accounts.getById(email)!;
+  }
+
+  return ctx.accounts.create(email, displayName, provider, providerAccountId);
+}
 
 // ============================================================================
 // Types
@@ -48,6 +132,9 @@ const GITHUB_ENDPOINTS = {
   authorization: 'https://github.com/login/oauth/authorize',
   token: 'https://github.com/login/oauth/access_token',
   userInfo: 'https://api.github.com/user',
+  // Authoritative verified-address list. The profile email from /user is
+  // user-settable and unverified, so it must never decide account identity.
+  userEmails: 'https://api.github.com/user/emails',
 };
 
 // ============================================================================
@@ -142,22 +229,44 @@ export async function getUserInfo(
   }
   
   const data = await response.json() as any;
-  
+
   if (provider === 'google') {
     return {
-      id: data.id,
-      email: data.email,
-      name: data.name,
-      avatar_url: data.picture,
+      id: String(data.id ?? data.sub),
+      email: selectVerifiedEmail('google', data),
+      name: data.name ?? null,
+      avatar_url: data.picture ?? null,
     };
   }
-  
-  // GitHub
+
+  // GitHub's /user email field is the user's public profile string and is not
+  // verified. /user/emails is the authoritative list; it needs the `user:email`
+  // scope, which getAuthorizationUrl requests.
+  const emailsResponse = await fetch(GITHUB_ENDPOINTS.userEmails, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+
+  if (!emailsResponse.ok) {
+    throw new Error(
+      `Failed to get verified GitHub emails: ${emailsResponse.statusText}. ` +
+        `The user:email scope is required.`
+    );
+  }
+
+  const emails = await emailsResponse.json() as Array<{
+    email?: string;
+    primary?: boolean;
+    verified?: boolean;
+  }>;
+
   return {
     id: String(data.id),
-    email: data.email || `${data.login}@github.com`,
-    name: data.name || data.login,
-    avatar_url: data.avatar_url,
+    email: selectVerifiedEmail('github', data, emails),
+    name: data.name ?? data.login ?? null,
+    avatar_url: data.avatar_url ?? null,
   };
 }
 

@@ -47,6 +47,28 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Identity Hardening — OAuth provider binding (LOCKED)
+- **Account identity is bound to the provider that created it.** Migration v6
+  adds `accounts.provider` + `accounts.provider_account_id` (the provider's own
+  stable user id) with a partial unique index. Resolution is by
+  `(provider, provider_account_id)`, never by email; a verified address that
+  belongs to another provider identity is rejected with
+  `AccountProviderMismatchError` (403).
+- **Only provider-verified addresses are accepted.** Google's
+  `verified_email`/`email_verified` is now checked; GitHub's profile email is
+  ignored entirely in favour of `/user/emails` (the profile field is
+  user-settable free text GitHub never verifies). The
+  `${login}@github.com` fallback — which minted addresses in a domain nobody
+  controls — is removed. Failure raises `UnverifiedEmailError` rather than
+  falling back.
+- Closed a cross-provider account-takeover path: setting a GitHub profile email
+  to a victim's Google address previously yielded a valid account token for
+  their account. Demonstrated by a failing test before the fix.
+- The OAuth provider's own access token is no longer stored as a FAM
+  authorization row.
+- Consequence to document for users: one email may only be used with the
+  provider it first registered with. Account linking is not implemented.
+
 ## Remaining
 
 ### Phase 3 — Directory Scoping (in progress)

@@ -8,6 +8,7 @@ import {
   getUserInfo,
   hashToken,
   generateOAuthState,
+  resolveAccountForProvider,
   type OAuthProviderConfig,
 } from '../../auth/oauth';
 import {
@@ -127,43 +128,44 @@ export function accountRoutes(ctx: DatabaseContext): Route[] {
         // Now delete the state (only on success)
         ctx.db.run(`DELETE FROM oauth_states WHERE state = ?`, [state]);
         
-        // Hash token for storage
-        const tokenHash = await hashToken(tokenResponse.access_token, SERVER_SECRET);
-        
-        // Create or get account + store authorization (transaction)
-        let account = ctx.accounts.getById(userInfo.email);
-        
+        // Resolve the account by PROVIDER IDENTITY, not by email address.
+        // getUserInfo has already refused anything the provider has not
+        // verified; this additionally refuses a verified address that belongs
+        // to an account owned by a different provider identity.
+        // Throws AccountProviderMismatchError (403) in that case.
+        const accountToken = crypto.randomUUID();
+        const accountTokenHash = await hashToken(accountToken, SERVER_SECRET);
+
+        let account: Awaited<ReturnType<typeof resolveAccountForProvider>>;
+
         ctx.db.run('BEGIN');
         try {
-          if (!account) {
-            account = ctx.accounts.create(userInfo.email, userInfo.name ?? undefined);
-          }
-          
-          // Store authorization
-          const authId = crypto.randomUUID();
-          ctx.db.run(
-            `INSERT OR REPLACE INTO authorizations (id, account_id, server_id, token_hash)
-             VALUES (?, ?, ?, ?)`,
-            [authId, account.id, 'local', tokenHash]
+          account = resolveAccountForProvider(
+            ctx,
+            provider,
+            userInfo.id,
+            userInfo.email,
+            userInfo.name ?? undefined
           );
-          
+
+          // Issue the FAM account token. The provider's own access token is
+          // deliberately NOT stored as a FAM credential: it previously was,
+          // which made anyone holding the user's Google/GitHub access token
+          // able to authenticate to FAM directly. It was then immediately
+          // clobbered by this row via UNIQUE(account_id, server_id), so the
+          // window was short — but the row should never have existed.
+          const accountAuthId = crypto.randomUUID();
+          ctx.db.run(
+            `INSERT OR REPLACE INTO authorizations (id, account_id, server_id, token_hash, expires_at)
+             VALUES (?, ?, ?, ?, datetime('now', '+30 days'))`,
+            [accountAuthId, account.id, 'local', accountTokenHash]
+          );
+
           ctx.db.run('COMMIT');
         } catch (e) {
           ctx.db.run('ROLLBACK');
           throw e;
         }
-        
-        // Generate cryptographically secure account token
-        const accountToken = crypto.randomUUID();
-        const accountTokenHash = await hashToken(accountToken, SERVER_SECRET);
-        
-        // Store the token hash (the raw token is only shown to the client once)
-        const accountAuthId = crypto.randomUUID();
-        ctx.db.run(
-          `INSERT OR REPLACE INTO authorizations (id, account_id, server_id, token_hash, expires_at)
-           VALUES (?, ?, ?, ?, datetime('now', '+30 days'))`,
-          [accountAuthId, account.id, 'local', accountTokenHash]
-        );
         
         // Return account info and token
         return new Response(

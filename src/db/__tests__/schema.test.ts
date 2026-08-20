@@ -3,14 +3,14 @@ import { Database } from 'bun:sqlite';
 import { initializeDatabase } from '../schema';
 
 describe('Schema Migrations', () => {
-  test('fresh database initializes at current schema version with v2-v5 objects', () => {
+  test('fresh database initializes at current schema version with v2-v6 objects', () => {
     const db = new Database(':memory:');
     initializeDatabase(db);
 
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(5);
+    expect(version.version).toBe(6);
 
     // v2 columns exist on all three tables
     for (const table of ['entities', 'channels', 'messages']) {
@@ -107,7 +107,7 @@ describe('Schema Migrations', () => {
     const version = db1
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(5);
+    expect(version.version).toBe(6);
 
     // v2 columns now exist and pre-existing data survived
     const cols = db1
@@ -211,7 +211,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(5);
+    expect(version.version).toBe(6);
 
     // The ambiguous row survived, normalized: target_entity_id and
     // source_entity_id stripped per the rule shape
@@ -222,6 +222,82 @@ describe('Schema Migrations', () => {
     expect(row.source_entity_id).toBeNull();
     expect(row.source_account_id).toBe('up@example.com');
     expect(row.action).toBe('deny');
+
+    db.close();
+  });
+
+  test('v5 database upgrades to v6, binding columns added and legacy rows left unbound', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE accounts (
+        id TEXT PRIMARY KEY,
+        display_name TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')));
+      INSERT INTO schema_version (version) VALUES (5);
+      INSERT INTO accounts (id, display_name) VALUES ('legacy@example.com', 'Legacy');
+    `);
+
+    initializeDatabase(db);
+
+    const version = db
+      .query('SELECT MAX(version) as version FROM schema_version')
+      .get() as { version: number };
+    expect(version.version).toBe(6);
+
+    const cols = db.query('PRAGMA table_info(accounts)').all() as { name: string }[];
+    const names = cols.map((c) => c.name);
+    expect(names).toContain('provider');
+    expect(names).toContain('provider_account_id');
+
+    // The pre-existing row survives and is unbound — it adopts a provider on
+    // its next authenticated login rather than being deleted or guessed at.
+    const legacy = db
+      .query('SELECT display_name, provider, provider_account_id FROM accounts WHERE id = ?')
+      .get('legacy@example.com') as any;
+    expect(legacy.display_name).toBe('Legacy');
+    expect(legacy.provider).toBeNull();
+    expect(legacy.provider_account_id).toBeNull();
+
+    db.close();
+  });
+
+  test('v6 unique index rejects a second account for the same provider identity', () => {
+    const db = new Database(':memory:');
+    initializeDatabase(db);
+
+    db.run(
+      `INSERT INTO accounts (id, provider, provider_account_id) VALUES (?, 'google', 'sub-1')`,
+      ['first@example.com']
+    );
+
+    // One provider identity must map to exactly one account, or the takeover
+    // the binding exists to prevent reopens by a different route.
+    expect(() =>
+      db.run(
+        `INSERT INTO accounts (id, provider, provider_account_id) VALUES (?, 'google', 'sub-1')`,
+        ['second@example.com']
+      )
+    ).toThrow();
+
+    db.close();
+  });
+
+  test('v6 unique index still allows many unbound legacy accounts', () => {
+    const db = new Database(':memory:');
+    initializeDatabase(db);
+
+    // The index is partial (WHERE provider IS NOT NULL). Without that clause a
+    // second pre-v6 row would collide and block the upgrade path.
+    db.run(`INSERT INTO accounts (id) VALUES ('a@example.com')`);
+    db.run(`INSERT INTO accounts (id) VALUES ('b@example.com')`);
+
+    const count = db.query('SELECT COUNT(*) c FROM accounts WHERE provider IS NULL').get() as {
+      c: number;
+    };
+    expect(count.c).toBe(2);
 
     db.close();
   });

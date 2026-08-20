@@ -127,6 +127,38 @@ export class RequestEntityTooLargeError extends FamError {
   }
 }
 
+/**
+ * The provider identity presented does not own this account.
+ *
+ * Account ids are email addresses, so without provider binding anyone able to
+ * present the same email string at ANY provider could claim the account.
+ * Deliberately does not reveal which provider owns it.
+ */
+export class AccountProviderMismatchError extends FamError {
+  constructor(accountId: string) {
+    super(
+      `Account ${accountId} is registered with a different identity provider. ` +
+        `Sign in with the provider you originally used.`,
+      'ACCOUNT_PROVIDER_MISMATCH',
+      403
+    );
+  }
+}
+
+/**
+ * The identity provider did not supply an address it has verified.
+ */
+export class UnverifiedEmailError extends FamError {
+  constructor(provider: string) {
+    super(
+      `${provider} did not return a verified email address. FAM derives account ` +
+        `identity from a verified address, so an unverified one cannot be used.`,
+      'UNVERIFIED_EMAIL',
+      403
+    );
+  }
+}
+
 export class UnsupportedFormatVersionError extends FamError {
   constructor(formatName: string, found: string, maxSupported: string) {
     super(

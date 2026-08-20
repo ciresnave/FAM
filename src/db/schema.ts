@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -251,6 +251,31 @@ const MIGRATIONS: Record<number, string[]> = {
     // the queued backlog immediately.
     `ALTER TABLE entities ADD COLUMN availability TEXT NOT NULL DEFAULT 'available'
       CHECK(availability IN ('available', 'unavailable'))`,
+  ],
+  6: [
+    // Bind each account to the identity provider that created it.
+    //
+    // Account ids are email addresses, and before this an OAuth callback
+    // matched on email alone. GitHub's /user endpoint returns the user's
+    // PUBLIC PROFILE email — user-settable and never verified by GitHub — so
+    // setting a GitHub profile email to a victim's Google address and signing
+    // in through GitHub yielded a valid token for the victim's account.
+    //
+    // provider_account_id is the provider's own stable user id (Google `sub`
+    // / GitHub numeric id), which the user cannot choose. Matching on
+    // (provider, provider_account_id) rather than on an email string is what
+    // actually closes the takeover; the email becomes a label rather than a key.
+    //
+    // Nullable because pre-v6 rows predate the binding. They adopt a provider
+    // on the next successful login (trust-on-first-use); there are no such
+    // rows in any deployed database today.
+    `ALTER TABLE accounts ADD COLUMN provider TEXT
+      CHECK(provider IS NULL OR provider IN ('google', 'github'))`,
+    'ALTER TABLE accounts ADD COLUMN provider_account_id TEXT',
+    // One provider identity maps to exactly one account.
+    `CREATE UNIQUE INDEX idx_accounts_provider_identity
+       ON accounts(provider, provider_account_id)
+       WHERE provider IS NOT NULL AND provider_account_id IS NOT NULL`,
   ],
 };
 

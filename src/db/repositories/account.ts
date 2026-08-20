@@ -17,14 +17,19 @@ export class AccountRepository {
   /**
    * Create a new account.
    */
-  create(id: AccountId, displayName?: string): Account {
+  create(
+    id: AccountId,
+    displayName?: string,
+    provider?: string,
+    providerAccountId?: string
+  ): Account {
     const stmt = this.db.prepare(`
-      INSERT INTO accounts (id, display_name)
-      VALUES (?, ?)
+      INSERT INTO accounts (id, display_name, provider, provider_account_id)
+      VALUES (?, ?, ?, ?)
     `);
-    
-    stmt.run(id, displayName ?? null);
-    
+
+    stmt.run(id, displayName ?? null, provider ?? null, providerAccountId ?? null);
+
     return this.getById(id)!;
   }
 
@@ -48,6 +53,35 @@ export class AccountRepository {
    */
   exists(id: AccountId): boolean {
     return this.getById(id) !== null;
+  }
+
+  /**
+   * Look an account up by the provider's own stable user id.
+   *
+   * This — not the email — is the authoritative identity. The provider id
+   * cannot be chosen by the user, whereas an email address can be typed into a
+   * profile field. Resolving by it also means a user changing their email at
+   * the provider keeps the same FAM account.
+   */
+  getByProviderIdentity(provider: string, providerAccountId: string): Account | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM accounts WHERE provider = ? AND provider_account_id = ?
+    `);
+
+    return stmt.get(provider, providerAccountId) as Account | null;
+  }
+
+  /**
+   * Bind an unbound (pre-v6) account to a provider identity on first login.
+   */
+  bindProvider(id: AccountId, provider: string, providerAccountId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE accounts
+      SET provider = ?, provider_account_id = ?, updated_at = datetime('now')
+      WHERE id = ? AND provider IS NULL
+    `);
+
+    stmt.run(provider, providerAccountId, id);
   }
 
   // --------------------------------------------------------------------------

@@ -11,6 +11,10 @@ export interface Account {
   display_name: string | null;
   created_at: string;
   updated_at: string;
+  /** Identity provider that owns this account. Null only for pre-v6 rows. */
+  provider: 'google' | 'github' | null;
+  /** The provider's own stable user id — the authoritative identity, not the email. */
+  provider_account_id: string | null;
 }
 
 // ============================================================================

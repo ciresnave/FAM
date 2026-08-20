@@ -1085,5 +1085,96 @@ describe('FAM Server Integration', () => {
       });
       expect(status).toBe(201);
     });
+
+    // ------------------------------------------------------------------
+    // Completeness, not spot-checks.
+    //
+    // The tests above prove the routes I remembered are protected. They
+    // would say exactly the same thing if I had missed one — so on their
+    // own they are not evidence that enforcement is complete.
+    //
+    // This enumerates EVERY registered route and requires each to be
+    // explicitly classified. A new route that nobody classifies fails the
+    // test rather than defaulting to unprotected, and any entity-scoped
+    // route that answers 2xx without a session fails it too.
+    // ------------------------------------------------------------------
+
+    test('every registered route is classified, and no entity-scoped route answers without a session', async () => {
+      const { setupRoutes } = await import('../routes');
+      const { WebSocketManager } = await import('../websocket');
+      const { MessageSendService } = await import('../services/messageSend');
+      const { PermissionChecker } = await import('../services/permissionChecker');
+
+      const ctx = getDatabaseContext();
+      const wsm = new WebSocketManager(ctx);
+      const routes = setupRoutes(ctx, wsm, new MessageSendService(ctx, wsm, new PermissionChecker(ctx)));
+
+      // No auth: public surface.
+      const PUBLIC = new Set([
+        '/', '/health',
+        '/accounts/authorize/:provider', '/accounts/callback/:provider',
+      ]);
+      // Establish a session; cannot require one.
+      const ESTABLISHING = new Set(['/entities/connect', '/entities/authenticate']);
+      // Guarded by an ACCOUNT token, not an entity session.
+      const ACCOUNT_SCOPED = new Set([
+        '/accounts/create-entity', '/accounts/list-entities', '/accounts/revoke-entity',
+        '/admin/api/grants', '/admin/api/grants/list', '/admin/api/grants/revoke',
+        '/admin/api/permissions', '/admin/api/permissions/list', '/admin/api/permissions/delete',
+        '/admin/api/directory',
+      ]);
+
+      // Validate their own session inline instead of via requireEntitySession,
+      // so they answer 400/404 rather than 401. Tracked as an inconsistency to
+      // resolve; listed explicitly so they cannot be mistaken for unprotected.
+      const LEGACY_INLINE_SESSION_CHECK = new Set([
+        '/entities/disconnect', '/entities/heartbeat', '/entities/availability',
+      ]);
+
+      const unclassified: string[] = [];
+      const enforced: string[] = [];
+
+      for (const pattern of routes.keys()) {
+        if (PUBLIC.has(pattern) || ESTABLISHING.has(pattern)) continue;
+        if (ACCOUNT_SCOPED.has(pattern) || LEGACY_INLINE_SESSION_CHECK.has(pattern)) continue;
+        if (pattern.includes(':')) { unclassified.push(pattern); continue; }
+        enforced.push(pattern);
+      }
+
+      // Fail closed: anything not deliberately classified is a failure, so a
+      // newly added route cannot default into being untested.
+      expect(unclassified).toEqual([]);
+
+      // Sanity: if this drops to zero the loop has stopped testing anything.
+      expect(enforced.length).toBeGreaterThan(10);
+
+      // Assert 401 EXACTLY, not "any 4xx".
+      //
+      // A mutation test showed why: reverting /entities/status to
+      // body-supplied identity still produced 400 (missing `status` field),
+      // and a check that accepted any 4xx called that "refused". It was
+      // answering "did this request fail?" when the question is "was identity
+      // required?". requireEntitySession runs before any field validation, so
+      // a properly protected route answers 401 and a route that validates
+      // fields first answers 400 — which now fails.
+      const wrong: Array<{ route: string; status: number }> = [];
+      for (const route of enforced) {
+        const { status } = await rawApi(route, {});
+        if (status !== 401) wrong.push({ route, status });
+      }
+      expect(wrong).toEqual([]);
+
+      // The legacy three must still refuse a forged session outright.
+      const legacyLeaked: Array<{ route: string; status: number }> = [];
+      for (const route of LEGACY_INLINE_SESSION_CHECK) {
+        const { status } = await rawApi(route, {
+          entity_id: victim.entity_id,
+          session_id: '00000000-0000-4000-8000-000000000000',
+          availability: 'unavailable',
+        });
+        if (status < 400) legacyLeaked.push({ route, status });
+      }
+      expect(legacyLeaked).toEqual([]);
+    });
   });
 });

@@ -1,0 +1,32 @@
+# Line-ending policy.
+#
+# Without this file, normalization depends on each contributor's local
+# `core.autocrlf`, which is a machine setting and not a property of the
+# repository. On this machine autocrlf=true happens to store LF correctly, but
+# a contributor with autocrlf=false on Windows would commit CRLF into the
+# blobs, and nothing in the repo would have said otherwise. Make it explicit.
+#
+# What matters is what git STORES, not what sits in the working tree — the
+# stored blob is what a hash or byte comparison reads. Working-tree files may
+# still appear CRLF on Windows; that is checkout behaviour and is fine.
+* text=auto eol=lf
+
+# LICENSE is byte-compared and hashed by license scanners and by anyone
+# verifying a fork carries an unmodified notice. A single differing byte —
+# including a line ending — makes it read as non-canonical. Pinned explicitly
+# rather than relying on the wildcard above.
+LICENSE* text eol=lf
+
+# Shell scripts must keep LF or they fail to execute on POSIX.
+*.sh text eol=lf
+
+# Binary — never normalize, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary
+*.db-wal binary
+*.db-shm binary

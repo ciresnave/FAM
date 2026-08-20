@@ -72,17 +72,19 @@ export function resolveAccountForProvider(
   if (bound) return bound;
 
   // 2. No account for this provider identity. If the address already belongs to
-  //    someone, it is not ours to take.
+  //    somebody, it is not ours to take — including when it has no provider
+  //    binding at all.
+  //
+  //    An earlier version adopted unbound accounts on first login
+  //    (trust-on-first-use) to cover pre-v6 rows. That is unsafe now that
+  //    accounts can also be created locally without OAuth: a bootstrapped
+  //    account would be claimable by whoever first signed in with the same
+  //    address. Since no deployed database has legacy rows, refusing costs
+  //    nothing and removes the whole class. Linking an existing account to a
+  //    provider is a deliberate operation, not a side effect of logging in.
   const existing = ctx.accounts.getById(email);
   if (existing) {
-    if (existing.provider || existing.provider_account_id) {
-      // Owned by a different provider identity — step 1 would have matched.
-      throw new AccountProviderMismatchError(email);
-    }
-    // Unbound pre-v6 row: adopt on first authenticated login. No such rows
-    // exist in any deployed database; this only covers upgrade-in-place.
-    ctx.accounts.bindProvider(email, provider, providerAccountId);
-    return ctx.accounts.getById(email)!;
+    throw new AccountProviderMismatchError(email);
   }
 
   return ctx.accounts.create(email, displayName, provider, providerAccountId);

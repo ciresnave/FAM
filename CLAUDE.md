@@ -11,10 +11,14 @@ Agent-framework-agnostic messaging for agents, humans, and tools. A fork of
 architecture and `ROADMAP.md` for phased status — ROADMAP.md is the source of
 truth for what is done and what is not.
 
-**Pre-alpha. Not deployable.** No local bootstrap — OAuth is the only way to
-create an account, so a fresh clone cannot be run end to end. FAM also defaults
-to port 7899 and so cannot run beside the claude-peers broker. Do not describe
-FAM as working end to end.
+**Pre-alpha.** Runs end to end locally via `bun run bootstrap <email>`, but is
+not ready to deploy. FAM defaults to port 7899 and so cannot run beside the
+claude-peers broker. Federation, key rotation and per-recipient channel
+delivery are unbuilt.
+
+`bun run bootstrap` writes to the database directly and is deliberately NOT an
+HTTP route — an endpoint that mints account credentials is an authentication
+bypass by construction. Do not "helpfully" expose it as one.
 
 Auth IS now enforced: entity-scoped routes call `requireEntitySession` and take
 identity from the session, never from a body-supplied `entity_id`. When adding

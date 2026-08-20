@@ -71,18 +71,12 @@ export class AccountRepository {
     return stmt.get(provider, providerAccountId) as Account | null;
   }
 
-  /**
-   * Bind an unbound (pre-v6) account to a provider identity on first login.
-   */
-  bindProvider(id: AccountId, provider: string, providerAccountId: string): void {
-    const stmt = this.db.prepare(`
-      UPDATE accounts
-      SET provider = ?, provider_account_id = ?, updated_at = datetime('now')
-      WHERE id = ? AND provider IS NULL
-    `);
-
-    stmt.run(provider, providerAccountId, id);
-  }
+  // NOTE: a bindProvider() lived here to adopt unbound accounts on first OAuth
+  // login. It was removed rather than left unused: adoption is exactly how a
+  // locally bootstrapped account would be claimed by whoever first signed in
+  // with the same address. Linking an existing account to a provider should be
+  // a deliberate operation, and when it is added it needs its own
+  // authorisation — not a silent UPDATE reachable from the login path.
 
   // --------------------------------------------------------------------------
   // Update

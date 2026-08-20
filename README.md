@@ -7,19 +7,21 @@ to each other.
 
 > ### ⚠️ Status: pre-alpha. Not production ready. Do not deploy.
 >
-> FAM is under active development and **cannot currently be run end to end**.
+> FAM runs end to end locally, but is not ready to be deployed.
 > Known gaps, documented in full in [`ROADMAP.md`](ROADMAP.md):
 >
-> - **No local bootstrap.** The OAuth callback is the only path that creates an
->   account, so a fresh clone cannot create one without registering an OAuth app.
->   This is what "cannot be run end to end" means in practice.
 > - **Port 7899 collides** with the claude-peers broker; they cannot both run.
-> - Not deployed anywhere, no accounts exist, and the surface has had one
->   security pass rather than a review.
+> - `scope: 'all'` on `/entities/list` returns every entity on the server to any
+>   authenticated caller. Whether one account may enumerate another's entities
+>   is an open policy question (Phase 3).
+> - Federation, key rotation and per-recipient channel delivery are unbuilt.
+> - Not deployed anywhere, and the surface has had security passes rather than
+>   a review.
 >
-> Two earlier blockers are now closed: entity-scoped routes enforce an
-> authenticated session rather than trusting a body-supplied `entity_id`, and
-> OAuth accounts are bound to the provider identity that created them.
+> Three earlier blockers are closed: entity-scoped routes enforce an
+> authenticated session rather than trusting a body-supplied `entity_id`, OAuth
+> accounts are bound to the provider identity that created them, and an account
+> can be created locally without registering an OAuth application.
 >
 > If you are looking for something that works today, use the predecessor —
 > see [Relationship to claude-peers](#relationship-to-claude-peers).
@@ -81,15 +83,38 @@ src/
 MCP is one transport adapter, not the interface. The HTTP and WebSocket APIs
 are the contract; anything that speaks them participates.
 
-## Development
+## Quick start
 
-Requires [Bun](https://bun.sh).
+Requires [Bun](https://bun.sh). No OAuth application needed.
 
 ```bash
 bun install
+cp .env.example .env                    # set FAM_SERVER_SECRET to anything random
+
+bun run bootstrap you@example.com       # creates a local account, prints a token ONCE
+bun run dev                             # starts the server on 127.0.0.1:7899
+```
+
+`bootstrap` writes to the database directly and is not reachable over HTTP —
+an endpoint that mints account credentials would be an authentication bypass by
+construction. Use the token it prints to create your first entity, then
+authenticate with the passkey you chose:
+
+```
+POST /accounts/create-entity   { account_token, name, type: "agent", passkey }
+POST /entities/connect         { entity_id, public_key }        -> nonce
+POST /entities/authenticate    { entity_id, nonce, signature }  -> session_id
+POST /messages/send            { session_id, to_entity, text }
+```
+
+Entity-scoped routes take identity from `session_id`. A body-supplied
+`entity_id` is optional and must agree with the session if present.
+
+## Development
+
+```bash
 bun run typecheck        # tsc --noEmit
 bun run test             # NOT `bun test` — see below
-bun run dev              # starts the server (needs FAM_SERVER_SECRET)
 ```
 
 **Use `bun run test`, not `bun test`.** Bun does not honour the `[test] timeout`

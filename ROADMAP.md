@@ -47,6 +47,27 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Local Bootstrap (LOCKED)
+- `bun run bootstrap <email>` creates an account with no provider binding and
+  issues an account token. FAM is runnable without registering an OAuth app.
+- **Not an HTTP route, deliberately.** An endpoint that mints account
+  credentials is an authentication bypass by construction, and gating one on an
+  env var makes a misconfiguration a remote hole. It runs against the database
+  directly, so reaching it already requires local filesystem access and the
+  server secret.
+- **Trust-on-first-use adoption removed from `resolveAccountForProvider`.** It
+  previously adopted unbound accounts on first OAuth login to cover pre-v6 rows.
+  With local accounts that becomes a takeover: a bootstrapped account would be
+  claimable by whoever first signed in with the same address. An existing
+  account is now never claimed by a provider identity that did not create it.
+  Account↔provider linking, if added, needs its own authorisation rather than
+  happening as a side effect of logging in.
+- Re-running bootstrap issues a new token and invalidates the previous one —
+  `authorizations` is `UNIQUE(account_id, server_id)`, so one live token at a time.
+- Verified end to end against a fresh database: bootstrap → create entity →
+  Ed25519 challenge-response → unauthenticated send refused (401) →
+  authenticated send → recipient receives.
+
 ### Identity Hardening — session enforcement (LOCKED)
 - **Entity identity comes from the session, never from the request body.**
   `requireEntitySession` (`src/server/middleware/auth.ts`) is the single

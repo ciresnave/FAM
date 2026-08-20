@@ -28,25 +28,26 @@ check `git remote -v` before any push you have not made before.
 | Remote | Target | Notes |
 | --- | --- | --- |
 | `origin` | `ciresnave/FAM` | Canonical. Push here. |
-| `claude-peers-mcp` | `ciresnave/claude-peers-mcp` | Pre-rename fork, superseded. Slated for deletion. |
 
 **`~/claude-peers-mcp` — the claude-peers broker checkout (separate clone).**
 
 | Remote | Target | Notes |
 | --- | --- | --- |
 | `origin` | `louislva/claude-peers-mcp` | **UPSTREAM — a third party's repository. Never push here.** |
-| `fork` | `ciresnave/claude-peers-mcp` | Superseded, slated for deletion. |
-| `fam` | `ciresnave/FAM` | Where broker work is archived. |
+| `fam` | `ciresnave/FAM` | Where broker work is archived. Push here. |
 
-`origin` pointing upstream is conventional for a fork and is correct there — the
-hazard is that it differs between the two trees, so a bare `git push` in the
-broker checkout targets someone else's project. Push explicitly by remote name
-in `~/claude-peers-mcp`.
+This is the one asymmetry to hold in mind: `origin` is *ours* in `C:\Projects\fam`
+and *someone else's* in `~/claude-peers-mcp`. Both are conventional in isolation —
+`origin` pointing upstream is normal for a fork — but a bare `git push` in the
+broker checkout targets Louis Arge's project. Push explicitly by remote name
+there.
 
-The broker branches `fix/preserve-undelivered-messages` (the code currently
-running) and `fix/cross-platform-support` (its rollback target) are archived on
-`ciresnave/FAM` so the pending deletion of `ciresnave/claude-peers-mcp` cannot
-destroy them.
+`ciresnave/claude-peers-mcp` (the pre-rename fork) was **deleted 2026-08-20**.
+Before deletion, the broker branches `fix/preserve-undelivered-messages` (the
+code currently running) and `fix/cross-platform-support` (its rollback target)
+were archived to `ciresnave/FAM`, since neither was reachable from FAM's `main`.
+Both are verified present there. Dead remotes pointing at the deleted repo have
+been removed from both checkouts — every configured remote now resolves.
 
 ## Architecture — FAM (`src/`)
 

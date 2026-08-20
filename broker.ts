@@ -63,6 +63,59 @@ db.run(`
   )
 `);
 
+// --- Indexes ---
+//
+// Without these, /poll-messages runs a full table scan plus a temp-B-tree sort
+// against a table that only grows. Measured on a three-day-old database: 33ms
+// per poll, 18 peers polling at 1Hz, ~59% of one core spent scanning — and the
+// cost rises linearly with lifetime message history, so the broker got slower
+// every day it ran until its event loop stalled and it started refusing
+// connections. With the index the same poll is an index seek.
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_messages_to_delivered
+    ON messages(to_id, delivered, sent_at)
+`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_messages_delivered ON messages(delivered)`);
+
+// --- Message retention ---
+
+// 0 disables the sweep entirely.
+const RETENTION_DAYS = parseInt(process.env.CLAUDE_PEERS_RETENTION_DAYS ?? "90", 10);
+
+// Prune messages that have ALREADY been delivered and are older than the
+// retention window.
+//
+// Only delivered rows. Deleting undelivered messages is what silently
+// destroyed mail for peers that restarted before polling — the sender had
+// already been told `{ ok: true }`. Indexes make polling cheap but do not bound
+// the table, and it grew ~13MB of message text in its first month.
+//
+// julianday() on BOTH sides, deliberately. sent_at is stored as ISO-8601
+// ("2026-08-20T23:55:10.611Z") while datetime('now', ...) yields
+// "2026-08-20 23:55:40" — a space separator and no Z. Comparing those as
+// strings puts 'T' (0x54) above ' ' (0x20), so every message sent on the
+// boundary day is skipped. Measured against the live database at a 30-day
+// window: the string form selected 23 rows, julianday selected 479.
+function sweepOldMessages() {
+  if (!Number.isFinite(RETENTION_DAYS) || RETENTION_DAYS <= 0) return;
+
+  const result = db.run(
+    `DELETE FROM messages
+     WHERE delivered = 1
+       AND julianday(sent_at) < julianday('now', '-' || ? || ' days')`,
+    [RETENTION_DAYS]
+  );
+
+  if (result.changes > 0) {
+    console.error(
+      `[claude-peers broker] retention: pruned ${result.changes} delivered message(s) older than ${RETENTION_DAYS}d`
+    );
+  }
+}
+
+sweepOldMessages();
+setInterval(sweepOldMessages, 60 * 60_000); // hourly
+
 // Check whether a process is still alive. process.kill(pid, 0) sends no signal —
 // it only probes existence. It throws ESRCH when the pid is truly gone, but EPERM
 // when the process EXISTS and we merely lack permission to signal it (a peer owned

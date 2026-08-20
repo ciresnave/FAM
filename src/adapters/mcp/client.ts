@@ -21,6 +21,9 @@ import { base64ToBuffer } from '../../crypto/keys';
 const FAM_SERVER_URL = process.env.FAM_SERVER_URL || 'http://127.0.0.1:7899';
 const FAM_WS_URL = process.env.FAM_WS_URL || 'ws://127.0.0.1:7899/ws';
 
+/** Routes that establish a session rather than consuming one. */
+const SESSION_ESTABLISHING_PATHS = new Set(['/entities/connect', '/entities/authenticate']);
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -96,10 +99,22 @@ export class FamClient {
    * Make an HTTP request to the FAM server.
    */
   async request<T>(path: string, body: object): Promise<T> {
+    // Entity-scoped routes derive identity from the session, so attach it to
+    // every call once we have one. Routes that ESTABLISH a session are excluded
+    // — they run before one exists.
+    const payload: Record<string, unknown> = { ...body };
+    if (
+      this.sessionId &&
+      payload.session_id === undefined &&
+      !SESSION_ESTABLISHING_PATHS.has(path)
+    ) {
+      payload.session_id = this.sessionId;
+    }
+
     const res = await fetch(`${this.serverUrl}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     });
     
     if (!res.ok) {

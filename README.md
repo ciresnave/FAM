@@ -10,16 +10,16 @@ to each other.
 > FAM is under active development and **cannot currently be run end to end**.
 > Known gaps, documented in full in [`ROADMAP.md`](ROADMAP.md):
 >
-> - **Authentication is built but not enforced.** `/messages/*`, `/channels/*`,
->   `/entities/list` and `/entities/status` read `entity_id` from the request
->   body and treat it as identity. Forging a message or reading another
->   entity's history requires no token, session, or key.
-> - **Cross-provider account takeover.** The OAuth callback matches accounts on
->   an email that GitHub does not verify, so a GitHub profile email can claim a
->   Google-created account.
 > - **No local bootstrap.** The OAuth callback is the only path that creates an
 >   account, so a fresh clone cannot create one without registering an OAuth app.
+>   This is what "cannot be run end to end" means in practice.
 > - **Port 7899 collides** with the claude-peers broker; they cannot both run.
+> - Not deployed anywhere, no accounts exist, and the surface has had one
+>   security pass rather than a review.
+>
+> Two earlier blockers are now closed: entity-scoped routes enforce an
+> authenticated session rather than trusting a body-supplied `entity_id`, and
+> OAuth accounts are bound to the provider identity that created them.
 >
 > If you are looking for something that works today, use the predecessor —
 > see [Relationship to claude-peers](#relationship-to-claude-peers).

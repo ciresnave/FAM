@@ -16,6 +16,7 @@ import {
   consumeChallenge,
   verifyChallengeResponse,
 } from '../../crypto/challenge';
+import { requireEntitySession } from '../middleware/auth';
 
 // ============================================================================
 // Entity Routes
@@ -259,16 +260,19 @@ export function entityRoutes(
       method: 'POST',
       pattern: '/entities/status',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, status } = body;
-        
-        if (!entity_id || !status) {
+        // Session required: status is observable by every peer, so an
+        // unauthenticated caller could previously mark any entity offline.
+        // Mirrors /entities/availability directly below.
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { status } = body;
+
+        if (!status) {
           return new Response(
-            JSON.stringify({ error: 'Missing entity_id or status' }),
+            JSON.stringify({ error: 'Missing status' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
-        
+
         if (!['online', 'offline', 'away'].includes(status)) {
           return new Response(
             JSON.stringify({ error: 'Invalid status. Must be: online, offline, away' }),
@@ -295,30 +299,24 @@ export function entityRoutes(
       method: 'POST',
       pattern: '/entities/list',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, scope, channel_id, limit, offset } = body;
-        
+        // Session required. Without it, `scope: 'directory'` accepted any
+        // entity_id, so anyone could read any account's private directory —
+        // which defeated the point of scoping it.
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { scope, channel_id, limit, offset } = body;
+
         // Validate pagination params
         const pagination = validatePagination({ limit, offset });
-        
+
         let entities;
-        
+
         if (scope === 'directory') {
-          // Directory scope is caller-relative: resolve the caller's account
-          if (!entity_id) {
-            return new Response(
-              JSON.stringify({ error: 'entity_id is required for scope "directory"' }),
-              { status: 400, headers: { 'Content-Type': 'application/json' } }
-            );
-          }
-          
-          validateEntityId(entity_id);
-          
+          // Caller-relative, and the caller is now the authenticated session.
           const caller = ctx.entities.getById(entity_id);
           if (!caller) {
             throw new NotFoundError('Entity', entity_id);
           }
-          
+
           entities = ctx.entities.getDirectoryForAccount(caller.account_id);
         } else if (scope === 'channel' && channel_id) {
           entities = ctx.entities.getByChannelId(channel_id);

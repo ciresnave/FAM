@@ -1,7 +1,10 @@
 // HTTP Client for CLI Commands
 
 import type { CliConfig } from './config';
-import { getServerUrl, getAccountToken, getActiveEntityId } from './config';
+import { getServerUrl, getAccountToken, getActiveEntityCredentials } from './config';
+import { decryptPrivateKey } from '../../crypto/encrypt';
+import { sign, base64ToBuffer } from '../../crypto/keys';
+import type { EncryptedKeyFile } from '../../types';
 
 // ============================================================================
 // Types
@@ -60,6 +63,51 @@ export async function apiRequest<T>(
   return res.json() as Promise<T>;
 }
 
+// Entity-scoped routes derive identity from an authenticated session, so the
+// CLI needs one before it can send a message or touch a channel. Cached for the
+// lifetime of the process: one challenge-response per invocation, not per call.
+let cachedSession: { entityId: string; sessionId: string } | null = null;
+
+/**
+ * Establish (or reuse) an entity session: decrypt the private key with the
+ * passkey, answer the server's nonce challenge, and keep the session id.
+ */
+export async function getEntitySession(
+  config: CliConfig
+): Promise<{ entityId: string; sessionId: string }> {
+  const credentials = await getActiveEntityCredentials();
+
+  if (cachedSession && cachedSession.entityId === credentials.entity_id) {
+    return cachedSession;
+  }
+
+  const passkey = config.passkey || process.env.FAM_PASSKEY;
+  if (!passkey) {
+    throw new Error(
+      'A passkey is required to authenticate this entity. Pass --passkey or set FAM_PASSKEY.'
+    );
+  }
+
+  const keyFile: EncryptedKeyFile = JSON.parse(credentials.encrypted_key_file);
+  const privateKeyBase64 = await decryptPrivateKey(keyFile, passkey);
+
+  const { nonce } = await apiRequest<{ nonce: string }>(config, '/entities/connect', {
+    entity_id: credentials.entity_id,
+    public_key: keyFile.public_key,
+  });
+
+  const signature = await sign(base64ToBuffer(nonce), privateKeyBase64);
+
+  const auth = await apiRequest<{ session_id: string }>(config, '/entities/authenticate', {
+    entity_id: credentials.entity_id,
+    nonce,
+    signature,
+  });
+
+  cachedSession = { entityId: credentials.entity_id, sessionId: auth.session_id };
+  return cachedSession;
+}
+
 /**
  * Make an authenticated request with entity context.
  */
@@ -68,10 +116,11 @@ export async function entityRequest<T>(
   path: string,
   extraBody?: object
 ): Promise<T> {
-  const entityId = await getActiveEntityId(config);
-  
+  const { entityId, sessionId } = await getEntitySession(config);
+
   return apiRequest<T>(config, path, {
     entity_id: entityId,
+    session_id: sessionId,
     ...extraBody,
   });
 }

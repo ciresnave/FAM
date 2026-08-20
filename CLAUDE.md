@@ -11,11 +11,16 @@ Agent-framework-agnostic messaging for agents, humans, and tools. A fork of
 architecture and `ROADMAP.md` for phased status — ROADMAP.md is the source of
 truth for what is done and what is not.
 
-**Pre-alpha. Not deployable.** Authentication is implemented but NOT enforced on
-`/messages/*`, `/channels/*`, `/entities/list` or `/entities/status` — those
-routes trust a body-supplied `entity_id`. There is also a cross-provider account
-takeover path in the OAuth callback, and no local bootstrap (OAuth is the only
-way to create an account). Do not describe FAM as working end to end.
+**Pre-alpha. Not deployable.** No local bootstrap — OAuth is the only way to
+create an account, so a fresh clone cannot be run end to end. FAM also defaults
+to port 7899 and so cannot run beside the claude-peers broker. Do not describe
+FAM as working end to end.
+
+Auth IS now enforced: entity-scoped routes call `requireEntitySession` and take
+identity from the session, never from a body-supplied `entity_id`. When adding
+a route that acts on behalf of an entity, use that helper — do not read
+`entity_id` from the body. `/entities/connect` and `/entities/authenticate` are
+the only exceptions, because they establish the session.
 
 ## Repositories and remotes — READ BEFORE PUSHING
 

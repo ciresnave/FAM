@@ -114,13 +114,42 @@ async function authenticateEntityFull(
   return authData;
 }
 
-async function api(path: string, body: object): Promise<{ status: number; data: any }> {
+/**
+ * Send exactly the given body — no session injected. Use this when the test is
+ * ABOUT authentication.
+ */
+async function rawApi(path: string, body: object): Promise<{ status: number; data: any }> {
   const res = await fetch(`${TEST_SERVER_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   return { status: res.status, data: await res.json() as any };
+}
+
+// Entity-scoped routes derive identity from an authenticated session. Tests
+// that are not about auth shouldn't each re-run the challenge-response dance,
+// so attach a cached session for whichever entity the body names.
+const sessionCache = new Map<string, string>();
+
+async function sessionFor(entityId: string): Promise<string> {
+  let existing = sessionCache.get(entityId);
+  if (!existing) {
+    existing = await seedSession(entityId);
+    sessionCache.set(entityId, existing);
+  }
+  return existing;
+}
+
+// These establish a session rather than consuming one.
+const NO_SESSION_ROUTES = new Set(['/entities/connect', '/entities/authenticate']);
+
+async function api(path: string, body: any): Promise<{ status: number; data: any }> {
+  const payload = { ...body };
+  if (payload.entity_id && !payload.session_id && !NO_SESSION_ROUTES.has(path)) {
+    payload.session_id = await sessionFor(payload.entity_id);
+  }
+  return rawApi(path, payload);
 }
 
 // ============================================================================
@@ -685,13 +714,13 @@ describe('FAM Server Integration', () => {
     const { entity_id } = await createEntity(token, 'av-peer');
 
     // Missing session_id
-    const { status: missing } = await api('/entities/availability', {
+    const { status: missing } = await rawApi('/entities/availability', {
       entity_id, availability: 'unavailable',
     });
     expect(missing).toBe(400);
 
     // Bogus session
-    const { status: bogus } = await api('/entities/availability', {
+    const { status: bogus } = await rawApi('/entities/availability', {
       entity_id, session_id: 'not-a-session', availability: 'unavailable',
     });
     expect(bogus).toBe(404);
@@ -735,7 +764,7 @@ describe('FAM Server Integration', () => {
     expect(sendData.message_id).toBeGreaterThan(0);
 
     // entities/list exposes availability (default scope: all entities)
-    const { data: listData } = await api('/entities/list', {});
+    const { data: listData } = await api('/entities/list', { entity_id: sender });
     const entry = listData.entities.find((e: any) => e.id === recipient);
     expect(entry.availability).toBe('unavailable');
 
@@ -824,14 +853,29 @@ describe('FAM Server Integration', () => {
     expect(gd.grant.status).toBe('active');
   });
 
-  test('entities/list scope=directory requires entity_id and validates it', async () => {
-    const { status: missing } = await api('/entities/list', { scope: 'directory' });
-    expect(missing).toBe(400);
+  test('entities/list scope=directory resolves the caller from the session, not the body', async () => {
+    const token = 'dir-caller-token';
+    await seedAccount('dircaller@example.com', token);
+    const { entity_id } = await createEntity(token, 'dir-caller');
+    const sessionId = await seedSession(entity_id);
 
-    const { status: unknown } = await api('/entities/list', {
-      entity_id: 'ghost@nowhere.example.com', scope: 'directory',
+    // No session at all: rejected before any scoping happens.
+    const { status: anon } = await rawApi('/entities/list', { scope: 'directory' });
+    expect(anon).toBe(401);
+
+    // Naming somebody else's entity no longer selects their directory � the
+    // session owns the identity and a mismatched body assertion is refused.
+    const { status: impersonated } = await rawApi('/entities/list', {
+      entity_id: 'ghost@nowhere.example.com', session_id: sessionId, scope: 'directory',
     });
-    expect(unknown).toBe(404);
+    expect(impersonated).toBe(401);
+
+    // The caller's own directory resolves without naming an entity.
+    const { status, data } = await rawApi('/entities/list', {
+      session_id: sessionId, scope: 'directory',
+    });
+    expect(status).toBe(200);
+    expect(data.entities.some((e: any) => e.id === entity_id)).toBe(true);
   });
 
   test('admin API directory annotates owned vs granted relationships', async () => {
@@ -867,7 +911,10 @@ describe('FAM Server Integration', () => {
   // -- Entity List with Pagination ------------------------------------------
 
   test('entities/list returns entities', async () => {
-    const { status, data } = await api('/entities/list', { scope: 'online' });
+    const lister = await createEntity(testToken, 'list-caller');
+    const { status, data } = await api('/entities/list', {
+      entity_id: lister.entity_id, scope: 'online',
+    });
     expect(status).toBe(200);
     expect(data.entities).toBeDefined();
     expect(data.total).toBeDefined();
@@ -875,7 +922,10 @@ describe('FAM Server Integration', () => {
   });
 
   test('entities/list respects pagination', async () => {
-    const { status, data } = await api('/entities/list', { limit: 1, offset: 0 });
+    const pager = await createEntity(testToken, 'page-caller');
+    const { status, data } = await api('/entities/list', {
+      entity_id: pager.entity_id, limit: 1, offset: 0,
+    });
     expect(status).toBe(200);
     expect(data.entities.length).toBeLessThanOrEqual(1);
     expect(data.limit).toBe(1);
@@ -914,5 +964,126 @@ describe('FAM Server Integration', () => {
   test('returns 405 for wrong method', async () => {
     const res = await fetch(`${TEST_SERVER_URL}/health`, { method: 'DELETE' });
     expect(res.status).toBe(405);
+  });
+
+  // -- Session Enforcement --------------------------------------------------
+  //
+  // Entity-scoped routes must derive the acting entity from an authenticated
+  // session. Reading `entity_id` from the request body makes the entire
+  // three-layer auth model decorative: the permission matrix, channel roles
+  // and grants all compute correct answers about an unverified subject.
+
+  describe('entity-scoped routes require a session', () => {
+    let victim: { entity_id: string; public_key: string; encrypted_key_file: any };
+    let attacker: { entity_id: string; public_key: string; encrypted_key_file: any };
+    let attackerSession: string;
+    let victimSession: string;
+
+    beforeAll(async () => {
+      victim = await createEntity(testToken, 'enforce-victim', 'pk', {
+        can_send: true,
+        can_create_channels: true,
+        can_join_channel: true,
+      });
+      attacker = await createEntity(testToken, 'enforce-attacker', 'pk', {
+        can_send: true,
+        can_create_channels: true,
+        can_join_channel: true,
+      });
+      attackerSession = await seedSession(attacker.entity_id);
+      victimSession = await seedSession(victim.entity_id);
+    });
+
+    test('POST /messages/send is rejected without a session', async () => {
+      const { status } = await rawApi('/messages/send', {
+        entity_id: victim.entity_id,
+        to_entity: attacker.entity_id,
+        text: 'forged',
+      });
+      expect(status).toBe(401);
+    });
+
+    // The core impersonation: a real session, used to act as somebody else.
+    test('POST /messages/send cannot act as an entity the session does not own', async () => {
+      const { status } = await rawApi('/messages/send', {
+        entity_id: victim.entity_id,
+        session_id: attackerSession,
+        to_entity: attacker.entity_id,
+        text: 'forged',
+      });
+      expect(status).toBe(401);
+    });
+
+    test('POST /messages/history is rejected without a session', async () => {
+      const { status } = await rawApi('/messages/history', {
+        entity_id: victim.entity_id,
+        other_entity_id: attacker.entity_id,
+      });
+      expect(status).toBe(401);
+    });
+
+    test('POST /messages/delivered is rejected without a session', async () => {
+      const { status } = await rawApi('/messages/delivered', {
+        entity_id: victim.entity_id,
+        message_ids: [1],
+      });
+      expect(status).toBe(401);
+    });
+
+    test('POST /channels/create is rejected without a session', async () => {
+      const { status } = await rawApi('/channels/create', {
+        entity_id: victim.entity_id,
+        name: 'forged-channel',
+      });
+      expect(status).toBe(401);
+    });
+
+    test('POST /channels/list-members is rejected without a session', async () => {
+      const { status } = await rawApi('/channels/list-members', {
+        channel_id: '00000000-0000-4000-8000-000000000000',
+      });
+      expect(status).toBe(401);
+    });
+
+    test('POST /entities/status is rejected without a session', async () => {
+      const { status } = await rawApi('/entities/status', {
+        entity_id: victim.entity_id,
+        status: 'offline',
+      });
+      expect(status).toBe(401);
+    });
+
+    test('POST /entities/list is rejected without a session', async () => {
+      const { status } = await rawApi('/entities/list', {});
+      expect(status).toBe(401);
+    });
+
+    // Enforcement must not break the legitimate path.
+    test('a valid session can send as its own entity', async () => {
+      const { status } = await rawApi('/messages/send', {
+        entity_id: victim.entity_id,
+        session_id: victimSession,
+        to_entity: attacker.entity_id,
+        text: 'legitimate',
+      });
+      expect(status).toBe(201);
+    });
+
+    test('a valid session may omit entity_id entirely — identity comes from the session', async () => {
+      const { status } = await rawApi('/messages/send', {
+        session_id: victimSession,
+        to_entity: attacker.entity_id,
+        text: 'identity from session',
+      });
+      expect(status).toBe(201);
+    });
+
+    test('a valid session can create a channel', async () => {
+      const { status } = await rawApi('/channels/create', {
+        session_id: victimSession,
+        name: 'legitimate-channel',
+      });
+      expect(status).toBe(201);
+    });
   });
 });

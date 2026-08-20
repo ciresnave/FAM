@@ -47,6 +47,30 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Identity Hardening — session enforcement (LOCKED)
+- **Entity identity comes from the session, never from the request body.**
+  `requireEntitySession` (`src/server/middleware/auth.ts`) is the single
+  enforcement point; every entity-scoped route calls it first. A body-supplied
+  `entity_id` is accepted only as a redundant assertion that must agree with
+  the session — disagreement is rejected rather than ignored, so a client that
+  believes it is acting as someone else is told.
+- Applied to all of `/messages/*`, `/channels/*`, `/entities/status` and
+  `/entities/list`. `/entities/connect` and `/entities/authenticate` are
+  excluded because they establish the session.
+- Session id is read from the body ONLY, deliberately not from
+  `Authorization: Bearer` — that header already carries the account token on
+  `/accounts/*` and `/admin/api/*`, and overloading it would make two different
+  credentials indistinguishable by anything but the route.
+- Clients updated to match: `FamClient.request` attaches the session to every
+  non-establishing call, and the CLI gained `getEntitySession` (challenge-
+  response once per process, cached) so entity-scoped commands work.
+- Before this, forging a DM as any entity and reading its history required no
+  token, session or key — proven with a working exploit and now with tests.
+- **Still open:** `scope: 'all'` on `/entities/list` returns every entity on the
+  server to any authenticated caller. Now authenticated, but the policy question
+  (should any entity enumerate every other account's entities?) is unanswered
+  and belongs with directory scoping in Phase 3.
+
 ### Identity Hardening — OAuth provider binding (LOCKED)
 - **Account identity is bound to the provider that created it.** Migration v6
   adds `accounts.provider` + `accounts.provider_account_id` (the provider's own

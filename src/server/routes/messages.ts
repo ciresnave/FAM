@@ -13,6 +13,7 @@ import {
   validatePagination,
 } from '../../types/validation';
 import { entityRateLimiter, RateLimitError } from '../middleware/rateLimit';
+import { requireEntitySession } from '../middleware/auth';
 
 // ============================================================================
 // Message Routes
@@ -29,12 +30,13 @@ export function messageRoutes(
       method: 'POST',
       pattern: '/messages/send',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, channel_id, to_entity, text } = body;
-        
-        if (!entity_id || !text) {
+        // Identity comes from the authenticated session, not the body.
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { channel_id, to_entity, text } = body;
+
+        if (!text) {
           return new Response(
-            JSON.stringify({ error: 'Missing entity_id or text' }),
+            JSON.stringify({ error: 'Missing text' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
@@ -78,12 +80,12 @@ export function messageRoutes(
       method: 'POST',
       pattern: '/messages/delivered',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, message_ids } = body;
-        
-        if (!entity_id || !message_ids) {
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { message_ids } = body;
+
+        if (!message_ids) {
           return new Response(
-            JSON.stringify({ error: 'Missing entity_id or message_ids' }),
+            JSON.stringify({ error: 'Missing message_ids' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
@@ -142,16 +144,9 @@ export function messageRoutes(
       method: 'POST',
       pattern: '/messages/history',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, channel_id, other_entity_id, limit, offset } = body;
-        
-        if (!entity_id) {
-          return new Response(
-            JSON.stringify({ error: 'Missing entity_id' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-        
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { channel_id, other_entity_id, limit, offset } = body;
+
         // Rate limit by entity
         try {
           entityRateLimiter.check(entity_id);

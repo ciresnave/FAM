@@ -16,6 +16,7 @@ import {
   validatePagination,
 } from '../../types/validation';
 import { entityRateLimiter, RateLimitError } from '../middleware/rateLimit';
+import { requireEntitySession } from '../middleware/auth';
 
 // ============================================================================
 // Channel Routes
@@ -29,8 +30,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/create',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, name, is_public } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { name, is_public } = body;
         
         if (!entity_id || !name) {
           return new Response(
@@ -82,8 +83,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/join',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, channel_id } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { channel_id } = body;
         
         if (!entity_id || !channel_id) {
           return new Response(
@@ -155,8 +156,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/leave',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, channel_id } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { channel_id } = body;
         
         if (!entity_id || !channel_id) {
           return new Response(
@@ -202,8 +203,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/list',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, include_public, limit, offset } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { include_public, limit, offset } = body;
         
         if (!entity_id) {
           return new Response(
@@ -241,7 +242,7 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/list-members',
       handler: async (req) => {
-        const body = await req.json() as any;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
         const { channel_id } = body;
         
         if (!channel_id) {
@@ -274,8 +275,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/invite',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, channel_id, invited_entity } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { channel_id, invited_entity } = body;
         
         if (!entity_id || !channel_id || !invited_entity) {
           return new Response(
@@ -363,8 +364,7 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/invitations',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
         
         if (!entity_id) {
           return new Response(
@@ -390,8 +390,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/decline-invite',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, invitation_id } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { invitation_id } = body;
         
         if (!entity_id || !invitation_id) {
           return new Response(
@@ -427,8 +427,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/kick',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, channel_id, target_entity } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { channel_id, target_entity } = body;
         
         if (!entity_id || !channel_id || !target_entity) {
           return new Response(
@@ -497,8 +497,8 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/set-role',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, channel_id, target_entity, role } = body;
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { channel_id, target_entity, role } = body;
         
         if (!entity_id || !channel_id || !target_entity || !role) {
           return new Response(

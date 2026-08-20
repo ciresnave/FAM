@@ -107,9 +107,13 @@ export async function runHistoryCommand(
     const time = new Date(msg.sent_at).toLocaleString();
     const from = msg.from_entity;
     const to = msg.to_entity || msg.channel_id;
-    const delivered = msg.delivered ? '' : ' [undelivered]';
-    
-    console.log(`[${time}] ${from} → ${to}${delivered}`);
+
+    // No delivery marker here. Delivery is per (message, recipient) since
+    // schema v7, so a single flag on the message cannot answer it — a channel
+    // message is delivered to some members and not others at the same time.
+    // `messages.delivered` still exists but is vestigial: nothing writes it,
+    // so rendering it would have marked every message "[undelivered]" forever.
+    console.log(`[${time}] ${from} → ${to}`);
     console.log(`  ${msg.text}`);
     console.log('');
   }

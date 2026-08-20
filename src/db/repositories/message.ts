@@ -38,6 +38,13 @@ export class MessageRepository {
     const result = stmt.run(fromEntityId, toEntityId, encryptedText);
     const messageId = result.lastInsertRowid as number;
 
+    // One recipient, recorded explicitly so acknowledgement is per-entity.
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO message_deliveries (message_id, recipient_entity_id) VALUES (?, ?)`
+      )
+      .run(messageId, toEntityId);
+
     const msg = this.getByIdRaw(messageId)!;
     // Return with original text for immediate use
     return { ...msg, text };
@@ -58,6 +65,17 @@ export class MessageRepository {
 
     const result = stmt.run(fromEntityId, channelId, encryptedText);
     const messageId = result.lastInsertRowid as number;
+
+    // Fan out to the members as they are AT SEND TIME, excluding the sender.
+    // Doing this on send rather than on read is what stops a later joiner
+    // inheriting history that was never addressed to them.
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO message_deliveries (message_id, recipient_entity_id)
+         SELECT ?, entity_id FROM channel_members
+         WHERE channel_id = ? AND entity_id != ?`
+      )
+      .run(messageId, channelId, fromEntityId);
 
     const msg = this.getByIdRaw(messageId)!;
     // Return with original text for immediate use
@@ -98,34 +116,20 @@ export class MessageRepository {
    * Returns both DMs and channel messages.
    */
   async getUndelivered(entityId: EntityId, limit: number = 100): Promise<Message[]> {
-    // Get direct messages
-    const dmStmt = this.db.prepare(`
-      SELECT * FROM messages
-      WHERE to_entity = ? AND delivered = 0
-      ORDER BY sent_at ASC
-      LIMIT ?
-    `);
-
-    const dms = dmStmt.all(entityId, limit) as Message[];
-
-    // Get channel messages for channels the entity is in
-    const channelStmt = this.db.prepare(`
+    // One indexed lookup rather than a DM query unioned with a
+    // channel-membership query. It also no longer depends on CURRENT channel
+    // membership: rows exist only for the members a message was actually
+    // fanned out to at send time.
+    const stmt = this.db.prepare(`
       SELECT m.* FROM messages m
-      JOIN channel_members cm ON m.channel_id = cm.channel_id
-      WHERE cm.entity_id = ? AND m.from_entity != ? AND m.delivered = 0
+      JOIN message_deliveries d ON d.message_id = m.id
+      WHERE d.recipient_entity_id = ? AND d.delivered = 0
       ORDER BY m.sent_at ASC
       LIMIT ?
     `);
 
-    const channelMessages = channelStmt.all(entityId, entityId, limit) as Message[];
-
-    // Combine and sort by time
-    const allMessages = [...dms, ...channelMessages].sort(
-      (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
-    ).slice(0, limit);
-    
-    // Decrypt if needed
-    return this.decryptMessages(allMessages);
+    const messages = stmt.all(entityId, limit) as Message[];
+    return this.decryptMessages(messages);
   }
 
   /**
@@ -176,32 +180,36 @@ export class MessageRepository {
     if (messageIds.length === 0) return [];
 
     const placeholders = messageIds.map(() => '?').join(',');
+    // Having a delivery row IS being a recipient — no separate ownership rule
+    // to keep in step, and a membership change cannot retroactively grant or
+    // revoke the right to acknowledge a past message.
     const stmt = this.db.prepare(`
-      SELECT id FROM messages
-      WHERE id IN (${placeholders})
-      AND (
-        to_entity = ?
-        OR channel_id IN (SELECT channel_id FROM channel_members WHERE entity_id = ?)
-      )
+      SELECT message_id AS id FROM message_deliveries
+      WHERE recipient_entity_id = ? AND message_id IN (${placeholders})
     `);
 
-    const rows = stmt.all(...messageIds, entityId, entityId) as Array<{ id: number }>;
+    const rows = stmt.all(entityId, ...messageIds) as Array<{ id: number }>;
     return rows.map(r => r.id);
   }
 
   /**
-   * Mark messages as delivered.
+   * Mark messages delivered FOR ONE RECIPIENT.
+   *
+   * Takes the acknowledging entity deliberately. The previous signature had no
+   * recipient at all, which is exactly what made one member's acknowledgement
+   * hide a channel message from every other member.
    */
-  markDelivered(messageIds: number[]): void {
+  markDelivered(entityId: EntityId, messageIds: number[]): void {
     if (messageIds.length === 0) return;
 
     const placeholders = messageIds.map(() => '?').join(',');
     const stmt = this.db.prepare(`
-      UPDATE messages SET delivered = 1
-      WHERE id IN (${placeholders})
+      UPDATE message_deliveries
+      SET delivered = 1, delivered_at = datetime('now')
+      WHERE recipient_entity_id = ? AND message_id IN (${placeholders})
     `);
 
-    stmt.run(...messageIds);
+    stmt.run(entityId, ...messageIds);
   }
 
   /**
@@ -209,13 +217,12 @@ export class MessageRepository {
    */
   markAllDelivered(entityId: EntityId): void {
     const stmt = this.db.prepare(`
-      UPDATE messages SET delivered = 1
-      WHERE (to_entity = ? OR channel_id IN (
-        SELECT channel_id FROM channel_members WHERE entity_id = ?
-      )) AND delivered = 0
+      UPDATE message_deliveries
+      SET delivered = 1, delivered_at = datetime('now')
+      WHERE recipient_entity_id = ? AND delivered = 0
     `);
 
-    stmt.run(entityId, entityId);
+    stmt.run(entityId);
   }
 
   // --------------------------------------------------------------------------
@@ -278,13 +285,11 @@ export class MessageRepository {
    */
   getUndeliveredCount(entityId: EntityId): number {
     const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM messages
-      WHERE (to_entity = ? OR channel_id IN (
-        SELECT channel_id FROM channel_members WHERE entity_id = ?
-      )) AND delivered = 0
+      SELECT COUNT(*) as count FROM message_deliveries
+      WHERE recipient_entity_id = ? AND delivered = 0
     `);
 
-    const result = stmt.get(entityId, entityId) as { count: number };
+    const result = stmt.get(entityId) as { count: number };
     return result.count;
   }
   

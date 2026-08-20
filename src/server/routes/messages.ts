@@ -129,7 +129,8 @@ export function messageRoutes(
           );
         }
         
-        ctx.messages.markDelivered(validMessageIds);
+        // Acknowledgement is per recipient — this entity's delivery rows only.
+        ctx.messages.markDelivered(entity_id, validMessageIds);
         
         return new Response(
           JSON.stringify({ ok: true, marked: validMessageIds.length }),

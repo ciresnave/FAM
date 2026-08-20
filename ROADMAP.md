@@ -47,6 +47,36 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Per-Recipient Delivery (LOCKED)
+- **`message_deliveries` (migration v7)**: one row per (message, recipient),
+  replacing the single `messages.delivered` flag shared by every recipient of a
+  channel message. One member acknowledging used to flip it for everyone, so a
+  member who was offline — or paused via availability — never received it. The
+  column answered "has anyone seen this?" while every caller read it as "has
+  THIS entity seen this?".
+- **Fan-out happens at SEND time**, to the members as they are then. A later
+  joiner no longer inherits history that was never addressed to them, and a
+  member who leaves keeps whatever was already queued for them.
+- `markDelivered(entityId, messageIds)` now takes the acknowledging entity —
+  the previous signature had no recipient at all, which is what made the bug
+  possible. `getUndelivered`, `getUndeliveredCount` and `markAllDelivered` are
+  all per-recipient.
+- **Ownership is now "has a delivery row"** rather than a separate rule over
+  `to_entity`/channel membership, so a membership change cannot retroactively
+  grant or revoke the right to acknowledge a past message. A sender no longer
+  "owns" their own channel message.
+- Backfill imprecision, accepted deliberately: channel rows are derived from
+  CURRENT membership because send-time membership was never recorded. Someone
+  who has since left loses a backlog; someone who has since joined inherits
+  history, carrying the old flag so anything already delivered stays delivered.
+  It cannot be reconstructed, and from v7 onward the question does not arise.
+- `messages.delivered` is now **vestigial** — nothing writes it. It is retained
+  because the backfill reads it and SQLite cannot drop a column cheaply. The CLI
+  history view no longer renders a delivery marker; a single flag cannot answer
+  a per-recipient question.
+- Mutation-verified: dropping the `recipient_entity_id` predicate from
+  `markDelivered` reddens three tests including the core one.
+
 ### Port Separation (LOCKED)
 - FAM's default port is **7900**; the claude-peers broker binds 7899. Both can
   run at once, so a migration is reversible instead of a single attempt with no
@@ -154,14 +184,6 @@ sign-off.
   become undecryptable).
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
-- Per-recipient channel message delivery tracking: the single
-  `messages.delivered` flag is shared across ALL channel recipients — when
-  one member acks (or one member's undelivered fetch returns it), other
-  members (e.g. paused/unavailable ones) can no longer see the message as
-  undelivered. Requires a new table (e.g. `message_deliveries`:
-  message_id × recipient_entity_id, delivered flag per row) plus migration
-  backfilling from existing DM flags. Also affects: availability flush for
-  channel messages, `/messages/delivered` acks, `getUndelivered` fan-out.
 - Encryption toggle tests (enable/disable over existing data).
 - MCP reconnect flows (server restart, undelivered delivery, fatal-error
   handling on revoked/deleted entity — stop reconnecting on 404/401).

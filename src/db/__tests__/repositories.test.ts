@@ -330,12 +330,13 @@ describe('MessageRepository', () => {
     const msg1 = await repo.sendDirectMessage('sender@test.com', 'recipient@test.com', 'Message 1');
     const msg2 = await repo.sendDirectMessage('sender@test.com', 'recipient@test.com', 'Message 2');
 
-    repo.markDelivered([msg1.id, msg2.id]);
+    repo.markDelivered('recipient@test.com', [msg1.id, msg2.id]);
 
-    const updated1 = await repo.getById(msg1.id);
-    const updated2 = await repo.getById(msg2.id);
-    expect(updated1!.delivered).toBe(1);
-    expect(updated2!.delivered).toBe(1);
+    // Delivery is per recipient now, so assert on what the recipient sees
+    // rather than on the shared messages.delivered column.
+    const undelivered = await repo.getUndelivered('recipient@test.com');
+    expect(undelivered.some(m => m.id === msg1.id)).toBe(false);
+    expect(undelivered.some(m => m.id === msg2.id)).toBe(false);
   });
 
   test('getOwnedMessageIds filters to owned messages', async () => {
@@ -344,15 +345,21 @@ describe('MessageRepository', () => {
     const channel = channels.create('owned-room', 'sender@test.com', true);
     const msg3 = await repo.sendChannelMessage('sender@test.com', channel.id, 'channel msg');
 
-    // recipient owns msg1 (DM) and msg3 (channel member via sender? no —
-    // sender created channel so sender is a member; recipient is not)
+    // Ownership is now "has a delivery row", i.e. was an actual recipient.
     const owned = repo.getOwnedMessageIds('recipient@test.com', [msg1.id, msg2.id, msg3.id]);
     expect(owned).toEqual([msg1.id]);
 
-    // sender owns msg3 (their channel) and msg2 (their own outgoing DM is not
-    // addressed to them, but channel membership covers msg3)
+    // The sender owns NOTHING here: msg1 and msg2 are their outgoing DMs, and
+    // a sender is excluded from their own channel fan-out. Previously channel
+    // membership made them "own" msg3, which meant acknowledging delivery of a
+    // message they wrote.
     const senderOwned = repo.getOwnedMessageIds('sender@test.com', [msg1.id, msg2.id, msg3.id]);
-    expect(senderOwned).toEqual([msg3.id]);
+    expect(senderOwned).toEqual([]);
+
+    // A real member of the channel does own it.
+    channels.addMember(channel.id, 'recipient@test.com', 'member');
+    const msg4 = await repo.sendChannelMessage('sender@test.com', channel.id, 'after joining');
+    expect(repo.getOwnedMessageIds('recipient@test.com', [msg4.id])).toEqual([msg4.id]);
   });
 
   test('gets direct message history', async () => {
@@ -381,7 +388,7 @@ describe('MessageRepository', () => {
     expect(undelivered[0].text).toBe('Message 1');
 
     // After marking delivered, no more undelivered
-    repo.markDelivered(undelivered.map(m => m.id));
+    repo.markDelivered('recipient@test.com', undelivered.map(m => m.id));
     const after = await repo.getUndelivered('recipient@test.com');
     expect(after.length).toBe(0);
   });

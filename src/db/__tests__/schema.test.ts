@@ -3,14 +3,14 @@ import { Database } from 'bun:sqlite';
 import { initializeDatabase } from '../schema';
 
 describe('Schema Migrations', () => {
-  test('fresh database initializes at current schema version with v2-v6 objects', () => {
+  test('fresh database initializes at current schema version with v2-v7 objects', () => {
     const db = new Database(':memory:');
     initializeDatabase(db);
 
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(6);
+    expect(version.version).toBe(7);
 
     // v2 columns exist on all three tables
     for (const table of ['entities', 'channels', 'messages']) {
@@ -107,7 +107,7 @@ describe('Schema Migrations', () => {
     const version = db1
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(6);
+    expect(version.version).toBe(7);
 
     // v2 columns now exist and pre-existing data survived
     const cols = db1
@@ -211,7 +211,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(6);
+    expect(version.version).toBe(7);
 
     // The ambiguous row survived, normalized: target_entity_id and
     // source_entity_id stripped per the rule shape
@@ -245,7 +245,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(6);
+    expect(version.version).toBe(7);
 
     const cols = db.query('PRAGMA table_info(accounts)').all() as { name: string }[];
     const names = cols.map((c) => c.name);
@@ -281,6 +281,56 @@ describe('Schema Migrations', () => {
         ['second@example.com']
       )
     ).toThrow();
+
+    db.close();
+  });
+
+  test('v6 database upgrades to v7 and backfills delivery rows from the shared flag', () => {
+    const db = new Database(':memory:');
+    initializeDatabase(db);
+
+    // Rewind to v6 so migration 7 runs against data created without it.
+    db.run('DROP TABLE IF EXISTS message_deliveries');
+    db.run('DELETE FROM schema_version WHERE version = 7');
+
+    db.run(`INSERT INTO accounts (id) VALUES ('v7@example.com')`);
+    for (const who of ['a', 'b', 'c']) {
+      db.run(
+        `INSERT INTO entities (id, account_id, type, public_key) VALUES (?, 'v7@example.com', 'agent', 'pk')`,
+        [`${who}@v7@example.com`]
+      );
+    }
+    db.run(`INSERT INTO channels (id, name, created_by_entity) VALUES ('ch-v7', 'room', 'a@v7@example.com')`);
+    for (const who of ['a', 'b', 'c']) {
+      db.run(`INSERT INTO channel_members (channel_id, entity_id) VALUES ('ch-v7', ?)`, [`${who}@v7@example.com`]);
+    }
+    // One DM already acknowledged, one channel message not yet.
+    db.run(
+      `INSERT INTO messages (id, from_entity, to_entity, text, delivered) VALUES (1, 'a@v7@example.com', 'b@v7@example.com', 'dm', 1)`
+    );
+    db.run(
+      `INSERT INTO messages (id, from_entity, channel_id, text, delivered) VALUES (2, 'a@v7@example.com', 'ch-v7', 'channel', 0)`
+    );
+
+    initializeDatabase(db);
+
+    const version = db.query('SELECT MAX(version) as version FROM schema_version').get() as { version: number };
+    expect(version.version).toBe(7);
+
+    // DM: exactly one recipient, and the old flag is preserved.
+    const dm = db
+      .query('SELECT recipient_entity_id, delivered FROM message_deliveries WHERE message_id = 1')
+      .all() as Array<{ recipient_entity_id: string; delivered: number }>;
+    expect(dm).toHaveLength(1);
+    expect(dm[0]!.recipient_entity_id).toBe('b@v7@example.com');
+    expect(dm[0]!.delivered).toBe(1);
+
+    // Channel: a row per member EXCEPT the sender, so an ack by one member can
+    // no longer hide the message from the others.
+    const ch = db
+      .query('SELECT recipient_entity_id FROM message_deliveries WHERE message_id = 2 ORDER BY recipient_entity_id')
+      .all() as Array<{ recipient_entity_id: string }>;
+    expect(ch.map((r) => r.recipient_entity_id)).toEqual(['b@v7@example.com', 'c@v7@example.com']);
 
     db.close();
   });

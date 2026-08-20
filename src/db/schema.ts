@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -276,6 +276,48 @@ const MIGRATIONS: Record<number, string[]> = {
     `CREATE UNIQUE INDEX idx_accounts_provider_identity
        ON accounts(provider, provider_account_id)
        WHERE provider IS NOT NULL AND provider_account_id IS NOT NULL`,
+  ],
+  7: [
+    // Per-recipient delivery tracking.
+    //
+    // `messages.delivered` is a SINGLE flag shared by every recipient of a
+    // channel message. One member acknowledging flipped it for everyone, so a
+    // member who was offline — or paused via availability — never received it.
+    // The column answered "has anyone seen this?" while every caller read it as
+    // "has THIS entity seen this?".
+    //
+    // Delivery is a property of (message, recipient), so it gets its own rows.
+    `CREATE TABLE IF NOT EXISTS message_deliveries (
+      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      recipient_entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      delivered INTEGER NOT NULL DEFAULT 0,
+      delivered_at TEXT,
+      PRIMARY KEY (message_id, recipient_entity_id)
+    )`,
+    // The hot path: "what is waiting for this entity?" runs on every
+    // authenticate and every availability flush.
+    `CREATE INDEX IF NOT EXISTS idx_message_deliveries_recipient
+       ON message_deliveries(recipient_entity_id, delivered)`,
+
+    // Backfill DMs: exactly one recipient, and the old flag was accurate.
+    `INSERT OR IGNORE INTO message_deliveries (message_id, recipient_entity_id, delivered)
+     SELECT id, to_entity, delivered FROM messages WHERE to_entity IS NOT NULL`,
+
+    // Backfill channel messages from CURRENT membership, excluding the sender.
+    //
+    // Known imprecision, accepted deliberately: membership now is not
+    // membership at send time. Someone who has since left loses a backlog they
+    // may never have read, and someone who has since joined inherits history
+    // addressed to the channel before them — carrying the old flag, so
+    // anything already marked delivered stays delivered rather than
+    // resurfacing. Send-time membership was never recorded, so it cannot be
+    // reconstructed. From here fan-out happens at send time and the question
+    // does not arise again.
+    `INSERT OR IGNORE INTO message_deliveries (message_id, recipient_entity_id, delivered)
+     SELECT m.id, cm.entity_id, m.delivered
+     FROM messages m
+     JOIN channel_members cm ON cm.channel_id = m.channel_id
+     WHERE m.channel_id IS NOT NULL AND cm.entity_id != m.from_entity`,
   ],
 };
 

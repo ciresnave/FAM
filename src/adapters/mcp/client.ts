@@ -13,13 +13,14 @@ import type {
   WebSocketMessagePush,
 } from '../../types';
 import { base64ToBuffer } from '../../crypto/keys';
+import { DEFAULT_SERVER_URL, DEFAULT_WS_URL } from '../../config';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-const FAM_SERVER_URL = process.env.FAM_SERVER_URL || 'http://127.0.0.1:7899';
-const FAM_WS_URL = process.env.FAM_WS_URL || 'ws://127.0.0.1:7899/ws';
+const FAM_SERVER_URL = process.env.FAM_SERVER_URL || DEFAULT_SERVER_URL;
+const FAM_WS_URL = process.env.FAM_WS_URL || DEFAULT_WS_URL;
 
 /** Routes that establish a session rather than consuming one. */
 const SESSION_ESTABLISHING_PATHS = new Set(['/entities/connect', '/entities/authenticate']);

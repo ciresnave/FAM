@@ -12,8 +12,7 @@ architecture and `ROADMAP.md` for phased status — ROADMAP.md is the source of
 truth for what is done and what is not.
 
 **Pre-alpha.** Runs end to end locally via `bun run bootstrap <email>`, but is
-not ready to deploy. FAM defaults to port 7899 and so cannot run beside the
-claude-peers broker. Federation, key rotation and per-recipient channel
+not ready to deploy. Federation, key rotation and per-recipient channel
 delivery are unbuilt.
 
 `bun run bootstrap` writes to the database directly and is deliberately NOT an
@@ -87,7 +86,21 @@ real traffic; do not delete it.
 - `shared/` — Shared types and auto-summary generation.
 - `cli.ts` — CLI for inspecting broker state.
 
-Note FAM also defaults to port 7899, so the two cannot run simultaneously.
+FAM defaults to port 7900 and the broker to 7899, so both can run at once —
+that is what makes a migration reversible rather than a single attempt.
+
+Endpoint defaults live in `src/config.ts`; do not restate them as literals.
+They were previously hand-written in fourteen places, which is how the two
+projects came to share a port. `src/__tests__/config.test.ts` fails if 7899
+reappears anywhere under `src/` outside that one file.
+
+## Toolchain
+
+Bun's version is not pinned anywhere. `bun test` and `bun run test` are NOT
+the same instrument on this machine: Bun ignores bunfig's `[test] timeout`, so
+bare `bun test` shows three spurious failures. Two commands that look
+interchangeable and are not — worth remembering before CI exists to disagree
+with you.
 
 ## Running
 

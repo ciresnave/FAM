@@ -10,7 +10,6 @@ to each other.
 > FAM runs end to end locally, but is not ready to be deployed.
 > Known gaps, documented in full in [`ROADMAP.md`](ROADMAP.md):
 >
-> - **Port 7899 collides** with the claude-peers broker; they cannot both run.
 > - `scope: 'all'` on `/entities/list` returns every entity on the server to any
 >   authenticated caller. Whether one account may enumerate another's entities
 >   is an open policy question (Phase 3).
@@ -92,7 +91,7 @@ bun install
 cp .env.example .env                    # set FAM_SERVER_SECRET to anything random
 
 bun run bootstrap you@example.com       # creates a local account, prints a token ONCE
-bun run dev                             # starts the server on 127.0.0.1:7899
+bun run dev                             # starts the server on 127.0.0.1:7900
 ```
 
 `bootstrap` writes to the database directly and is not reachable over HTTP —

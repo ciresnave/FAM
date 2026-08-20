@@ -47,6 +47,22 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Port Separation (LOCKED)
+- FAM's default port is **7900**; the claude-peers broker binds 7899. Both can
+  run at once, so a migration is reversible instead of a single attempt with no
+  back-out.
+- Root cause was duplication, not the number: the default was hand-written in
+  **fourteen** places across the server, MCP adapter and CLI. All now derive
+  from `src/config.ts`, which also names `CLAUDE_PEERS_BROKER_PORT` so the
+  constraint is stated rather than implied.
+- `src/__tests__/config.test.ts` fails if the literal 7899 reappears anywhere
+  under `src/` outside that file — fixing the number without fixing the
+  duplication would just mean the next person reintroduces it in one file.
+  Mutation-verified: re-adding the literal to `http.ts` reddens the check and
+  names the file and line.
+- Verified against the LIVE broker serving 17 real peers: FAM came up on 7900,
+  the broker's peer count was unchanged, and it survived FAM shutting down.
+
 ### Local Bootstrap (LOCKED)
 - `bun run bootstrap <email>` creates an account with no provider binding and
   issues an account token. FAM is runnable without registering an OAuth app.

@@ -22,6 +22,7 @@ import { runSendCommand } from './commands/message';
 import { runHistoryCommand } from './commands/message';
 import { runChannelCommand } from './commands/channel';
 import { loadCredentials, type CliConfig } from './config';
+import { DEFAULT_SERVER_URL } from '../../config';
 
 // ============================================================================
 // Logging
@@ -78,7 +79,7 @@ COMMANDS:
     invitations           List pending invitations
 
 OPTIONS:
-  --server <url>          FAM server URL (default: http://127.0.0.1:7899)
+  --server <url>          FAM server URL (default: ${DEFAULT_SERVER_URL})
   --entity <id>           Entity ID to use (default: from credentials)
   --help                  Show this help
   --version               Show version
@@ -156,7 +157,7 @@ async function main() {
   
   // Load config
   const config: CliConfig = {
-    serverUrl: (args.flags.server as string) || process.env.FAM_SERVER_URL || 'http://127.0.0.1:7899',
+    serverUrl: (args.flags.server as string) || process.env.FAM_SERVER_URL || DEFAULT_SERVER_URL,
     entityId: (args.flags.entity as string) || null,
     passkey: process.env.FAM_PASSKEY || null,
   };

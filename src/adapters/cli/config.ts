@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import { stampVersion, assertFormatSupported } from '../../utils/versioning';
+import { DEFAULT_SERVER_URL } from '../../config';
 
 // ============================================================================
 // Types
@@ -224,5 +225,5 @@ export async function getServerUrl(config: CliConfig): Promise<string> {
     return credentials.server_url;
   }
   
-  return 'http://127.0.0.1:7899';
+  return DEFAULT_SERVER_URL;
 }

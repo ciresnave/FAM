@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { URL } from 'url';
 import { apiRequest } from '../client';
 import { saveCredentials, loadCredentials, type CliConfig } from '../config';
+import { DEFAULT_SERVER_URL } from '../../../config';
 
 // ============================================================================
 // Types
@@ -93,7 +94,7 @@ export async function runAuthCommand(
         }
         
         // Exchange code with FAM server
-        const serverUrl = config.serverUrl || 'http://127.0.0.1:7899';
+        const serverUrl = config.serverUrl || DEFAULT_SERVER_URL;
         const redirectUrl = `${serverUrl}${oauthConfig.callbackPath}?code=${code}&state=${returnedState}`;
         
         const response = await fetch(redirectUrl);
@@ -123,7 +124,7 @@ export async function runAuthCommand(
     
     server.listen(callbackPort, () => {
       // Open browser to FAM server authorize endpoint (which redirects to OAuth provider)
-      const serverUrl = config.serverUrl || 'http://127.0.0.1:7899';
+      const serverUrl = config.serverUrl || DEFAULT_SERVER_URL;
       const authUrl = `${serverUrl}/accounts/authorize/${provider}`;
       
       // Try to open browser
@@ -177,7 +178,7 @@ export async function runAuthCommand(
       ...filtered,
       { entity_id: entityData.entity_id, encrypted_key_file: entityData.encrypted_key_file },
     ],
-    server_url: config.serverUrl || 'http://127.0.0.1:7899',
+    server_url: config.serverUrl || DEFAULT_SERVER_URL,
   });
   
   console.log(`\nCredentials saved to ~/.fam/credentials.json`);

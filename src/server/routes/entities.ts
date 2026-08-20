@@ -17,6 +17,7 @@ import {
   verifyChallengeResponse,
 } from '../../crypto/challenge';
 import { requireEntitySession } from '../middleware/auth';
+import { DEFAULT_PORT } from '../../config';
 
 // ============================================================================
 // Entity Routes
@@ -122,7 +123,7 @@ export function entityRoutes(
         
         // Build WebSocket URL from server config
         const host = process.env.FAM_HOST || '127.0.0.1';
-        const port = process.env.FAM_PORT || '7899';
+        const port = process.env.FAM_PORT || String(DEFAULT_PORT);
         const wsUrl = `ws://${host}:${port}/ws?entity_id=${encodeURIComponent(entity_id)}&session_id=${session.id}`;
         
         return new Response(

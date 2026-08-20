@@ -25,13 +25,14 @@ import {
 import { generateKeyPair, bufferToBase64 } from '../../crypto/keys';
 import { encryptPrivateKey } from '../../crypto/encrypt';
 import { validateAccountToken } from '../middleware/auth';
+import { DEFAULT_SERVER_URL } from '../../config';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 const SERVER_SECRET = process.env.FAM_SERVER_SECRET!;
-const SERVER_URL = process.env.FAM_SERVER_URL || 'http://localhost:7899';
+const SERVER_URL = process.env.FAM_SERVER_URL || DEFAULT_SERVER_URL;
 
 const OAUTH_CONFIG: OAuthProviderConfig = {
   google: process.env.GOOGLE_CLIENT_ID

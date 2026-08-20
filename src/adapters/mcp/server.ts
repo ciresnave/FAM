@@ -28,13 +28,14 @@ import type { EncryptedKeyFile } from '../../types';
 import { getActiveEntityCredentials } from '../cli/config';
 import { homedir } from 'os';
 import { join } from 'path';
+import { DEFAULT_SERVER_URL, DEFAULT_WS_URL } from '../../config';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-const FAM_SERVER_URL = process.env.FAM_SERVER_URL || 'http://127.0.0.1:7899';
-const FAM_WS_URL = process.env.FAM_WS_URL || 'ws://127.0.0.1:7899/ws';
+const FAM_SERVER_URL = process.env.FAM_SERVER_URL || DEFAULT_SERVER_URL;
+const FAM_WS_URL = process.env.FAM_WS_URL || DEFAULT_WS_URL;
 const FAM_ENTITIES_DIR = join(homedir(), '.fam');
 
 // ============================================================================
@@ -72,7 +73,7 @@ async function loadCredentials(): Promise<EntityCredentials> {
     throw new Error(
       `No FAM credentials found at ${credentialsPath}. Run the FAM account setup first:\n` +
       `  1. Start the FAM server: bun src/server/http.ts\n` +
-      `  2. Visit http://localhost:7899/accounts/authorize/google (or github)\n` +
+      `  2. Visit ${FAM_SERVER_URL}/accounts/authorize/google (or github)\n` +
       `  3. Create an entity via the API\n` +
       `  4. Save credentials to ${credentialsPath}`
     );

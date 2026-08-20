@@ -12,6 +12,7 @@ import { ipRateLimiter, entityRateLimiter, getClientIp, RateLimitError } from '.
 import { assignRequestId, getRequestId } from './middleware/requestId';
 import { RequestEntityTooLargeError, ValidationError } from '../types/errors';
 import { logger } from '../utils/logger';
+import { DEFAULT_PORT } from '../config';
 
 // ============================================================================
 // Configuration
@@ -35,7 +36,7 @@ if (!hasGoogleOAuth && !hasGitHubOAuth) {
 }
 
 // Validate host/port
-const PORT = parseInt(process.env.FAM_PORT || '7899', 10);
+const PORT = parseInt(process.env.FAM_PORT || String(DEFAULT_PORT), 10);
 if (isNaN(PORT) || PORT < 1 || PORT > 65535) {
   logger.error('FAM_PORT must be a valid port number (1-65535)');
   process.exit(1);

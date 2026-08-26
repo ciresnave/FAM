@@ -786,7 +786,9 @@ describe('FAM Server Integration', () => {
     const undelivered = await ctx.messages.getUndelivered(recipient);
     expect(undelivered.length).toBe(1);
     expect(undelivered[0].text).toBe('queued while away');
-    expect(undelivered[0].delivered).toBe(0);
+    // Still undelivered FOR THIS RECIPIENT until it acks — which is the
+    // question the old shared flag could not answer.
+    expect(ctx.messages.getUndeliveredCount(recipient)).toBeGreaterThan(0);
   });
 
   test('authenticate response includes availability', async () => {

@@ -309,7 +309,8 @@ describe('MessageRepository', () => {
     expect(message.from_entity).toBe('sender@test.com');
     expect(message.to_entity).toBe('recipient@test.com');
     expect(message.text).toBe('Hello, world!');
-    expect(message.delivered).toBe(0);
+    // Delivery state is per recipient — ask message_deliveries, not the message.
+    expect(repo.getUndeliveredCount('recipient@test.com')).toBeGreaterThan(0);
   });
 
   test('sends channel message', async () => {

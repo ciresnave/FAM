@@ -96,10 +96,13 @@ sign-off.
   who has since left loses a backlog; someone who has since joined inherits
   history, carrying the old flag so anything already delivered stays delivered.
   It cannot be reconstructed, and from v7 onward the question does not arise.
-- `messages.delivered` is now **vestigial** — nothing writes it. It is retained
-  because the backfill reads it and SQLite cannot drop a column cheaply. The CLI
-  history view no longer renders a delivery marker; a single flag cannot answer
-  a per-recipient question.
+- `messages.delivered` is **vestigial** — nothing writes it. The COLUMN is
+  retained because migration v7's backfill reads it and SQLite cannot drop a
+  column cheaply, but it is **removed from the `Message` type**, so the compiler
+  refuses reads rather than a comment asking people not to. The CLI history view
+  rendered "[undelivered]" from it and would have marked every message
+  undelivered forever; that is the bug the omission prevents recurring. Ask
+  `getUndelivered` / `getUndeliveredCount` instead.
 - Mutation-verified: dropping the `recipient_entity_id` predicate from
   `markDelivered` reddens three tests including the core one.
 

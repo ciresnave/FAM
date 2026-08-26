@@ -89,7 +89,20 @@ export interface Message {
   to_entity: EntityId | null;
   text: string;
   sent_at: string;
-  delivered: number; // 0 or 1 (SQLite boolean)
+  // NOTE: there is deliberately no `delivered` field.
+  //
+  // The `messages.delivered` COLUMN still exists — migration v7's backfill
+  // reads it, and SQLite cannot drop a column cheaply — but nothing has
+  // written it since v7. Delivery is per (message, recipient) and lives in
+  // `message_deliveries`; a single flag on the message cannot answer it,
+  // because a channel message is delivered to some members and not others at
+  // the same time.
+  //
+  // It is omitted from the type so the compiler refuses reads rather than a
+  // comment asking people not to. The CLI history view rendered
+  // "[undelivered]" from that column and would have marked every message
+  // undelivered forever — that is the bug this omission prevents recurring.
+  // Ask `message_deliveries` (getUndelivered / getUndeliveredCount) instead.
 }
 
 // ============================================================================

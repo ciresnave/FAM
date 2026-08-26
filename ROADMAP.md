@@ -47,6 +47,29 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Encryption Toggle Safety (LOCKED)
+- `FAM_ENCRYPT_MESSAGES` is a boolean over a database that may already hold rows
+  written under the other setting. Both directions failed badly and neither was
+  covered:
+  - **ON over plaintext rows** surfaced AES-GCM's *"The provided data is too
+    small"* — accurate, useless, and indistinguishable from corruption or a
+    wrong key. Now raises `MessageEncryptionMismatchError` naming the flag and
+    saying enabling it does not retroactively encrypt existing rows.
+  - **OFF over ciphertext rows was SILENT.** The repository skipped decryption
+    and returned the raw envelope JSON *as the message text*, showing a person
+    ciphertext as if someone had written it. Now refused by `assertNotSealed`,
+    which names the offending message id.
+- The silent direction was the dangerous one and is the reason this outranked
+  building anything new: it was reachable by flipping one env var on a live
+  database, and produced no error to notice.
+- Detection keys on the full envelope shape **including `version`**, so a user
+  whose message text is legitimately JSON — including `{"iv":"x","ct":"y"}` —
+  is not mistaken for ciphertext. Covered by test.
+- Verified end to end across separate processes (the flag is read at module
+  load) on a database holding one row from each setting: both directions now
+  throw with actionable text.
+- Mutation-verified: disabling the guard reddens two tests.
+
 ### Key Rotation (LOCKED)
 - **Rotating `FAM_SERVER_SECRET` is supported.** It was previously documented
   as "don't" — a prohibition standing in for an unhandled case, because the
@@ -259,7 +282,6 @@ sign-off.
   newer-than-server.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
-- Encryption toggle tests (enable/disable over existing data).
 - MCP reconnect flows (server restart, undelivered delivery, fatal-error
   handling on revoked/deleted entity — stop reconnecting on 404/401).
 - Admin edge cases: grant revocation during active DM, concurrent admin ops.

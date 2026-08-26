@@ -2,7 +2,12 @@
 
 import { Database } from 'bun:sqlite';
 import type { Message, EntityId, ChannelId } from '../../types';
-import { encryptMessage, decryptMessage, keyringFromEnv } from '../../crypto/message-encryption';
+import {
+  encryptMessage,
+  decryptMessage,
+  keyringFromEnv,
+  assertNotSealed,
+} from '../../crypto/message-encryption';
 
 // ============================================================================
 // Configuration
@@ -305,6 +310,12 @@ export class MessageRepository {
    */
   private async decryptMessages(messages: Message[]): Promise<Message[]> {
     if (!ENCRYPT_MESSAGES || !SERVER_SECRET) {
+      // Encryption is off, but rows written while it was ON are still
+      // ciphertext. Without this the envelope JSON is returned AS the message
+      // text and shown to a person as if someone had written it — a silent
+      // failure, and the only one of the two toggle directions that produces
+      // no error at all.
+      assertNotSealed(messages);
       return messages;
     }
     

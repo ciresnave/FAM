@@ -177,6 +177,20 @@ export class MessageKeyUnavailableError extends FamError {
   }
 }
 
+/**
+ * Stored message data does not match the current FAM_ENCRYPT_MESSAGES setting.
+ *
+ * The flag is a boolean over a database that may already hold rows written
+ * under the other setting, and neither direction fails usefully on its own:
+ * turning it ON surfaces AES-GCM's "provided data is too small", and turning it
+ * OFF is SILENT — the raw ciphertext envelope is handed back as message text.
+ */
+export class MessageEncryptionMismatchError extends FamError {
+  constructor(detail: string) {
+    super(detail, 'MESSAGE_ENCRYPTION_MISMATCH', 500);
+  }
+}
+
 export class UnsupportedFormatVersionError extends FamError {
   constructor(formatName: string, found: string, maxSupported: string) {
     super(

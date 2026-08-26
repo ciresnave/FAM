@@ -16,7 +16,7 @@
 
 import { bufferToBase64, base64ToBuffer } from './argon2';
 import { stampVersion, assertFormatSupported, type Versioned } from '../utils/versioning';
-import { MessageKeyUnavailableError } from '../types/errors';
+import { MessageKeyUnavailableError, MessageEncryptionMismatchError } from '../types/errors';
 
 // ============================================================================
 // Configuration
@@ -191,6 +191,41 @@ function parseEnvelope(stored: string): CiphertextEnvelope | null {
   }
 }
 
+/**
+ * Is this stored text a FAM ciphertext envelope?
+ *
+ * Used to catch ciphertext about to be handed back as message text, which is
+ * what happens when FAM_ENCRYPT_MESSAGES is turned OFF over rows written while
+ * it was on — silently, with no error at all.
+ *
+ * Keys on the FULL envelope shape including `version`, which encryptMessage
+ * stamps. A user may legitimately send JSON as their message text, and
+ * `{"iv":"x","ct":"y"}` typed by a person must not be mistaken for one.
+ */
+export function looksLikeCiphertextEnvelope(stored: string): boolean {
+  const envelope = parseEnvelope(stored);
+  return envelope !== null && typeof (envelope as { version?: unknown }).version === 'string';
+}
+
+/**
+ * Refuse to hand ciphertext back as message text.
+ *
+ * Call this on the read path when FAM_ENCRYPT_MESSAGES is OFF. Rows written
+ * while it was ON are still sealed, and returning them unchanged shows a person
+ * an envelope as if it were what someone wrote — the only one of the two toggle
+ * directions that produces no error at all.
+ */
+export function assertNotSealed(messages: Array<{ id: number; text: string }>): void {
+  const sealed = messages.find((m) => looksLikeCiphertextEnvelope(m.text));
+  if (!sealed) return;
+
+  throw new MessageEncryptionMismatchError(
+    `Message ${sealed.id} is stored as ciphertext but FAM_ENCRYPT_MESSAGES is ` +
+      `not enabled, so it cannot be read. Re-enable the flag (and supply the ` +
+      `secret that sealed it) rather than serving the envelope as text.`
+  );
+}
+
 // ============================================================================
 // Encryption
 // ============================================================================
@@ -259,11 +294,24 @@ export async function decryptMessage(
     key = await resolveKeyFor(undefined, keyring);
   }
 
-  const decrypted = await crypto.subtle.decrypt(
-    { name: ALGORITHM, iv },
-    key,
-    ciphertext
-  );
+  let decrypted: ArrayBuffer;
+  try {
+    decrypted = await crypto.subtle.decrypt({ name: ALGORITHM, iv }, key, ciphertext);
+  } catch (e) {
+    // A row that is not an envelope and will not decrypt is almost always a
+    // row written while FAM_ENCRYPT_MESSAGES was off. AES-GCM cannot tell that
+    // from corruption or a wrong key, and says so in a way that helps nobody.
+    if (!envelope) {
+      throw new MessageEncryptionMismatchError(
+        'Stored message could not be decrypted and is not a FAM ciphertext ' +
+          'envelope. It was most likely written while FAM_ENCRYPT_MESSAGES was ' +
+          'disabled — enabling that flag does not retroactively encrypt rows ' +
+          'that already exist. Either restore the previous setting or migrate ' +
+          'the existing rows.'
+      );
+    }
+    throw e;
+  }
 
   const decoder = new TextDecoder();
   return decoder.decode(decrypted);

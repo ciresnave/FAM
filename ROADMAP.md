@@ -47,6 +47,35 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Admin API Existence Oracles (partial — one class open)
+Found while designing Phase 4 against the existing admin API rather than by
+reviewing it. The directory-scoping ruling forbids cross-account enumeration;
+an admin surface leaks it back not through a list but through an ERROR that
+distinguishes "does not exist" from "exists but is not yours".
+
+**Closed.** Your OWN entity, in `/admin/api/grants` and in a permission rule's
+target, answered 403 when it existed elsewhere and 404 when it did not — so any
+entity id could be probed. Both now answer 404 identically. You can only grant
+or target your own, so the distinction served no caller and enumerated for an
+attacker.
+
+**Open, and a Phase 4 design question.** Existence of a FOREIGN subject is still
+disclosed: grant creation answers 201 vs 404 on whether the grantee account
+exists, and a permission rule does the same for its source entity/account.
+- All three are enforced by FOREIGN KEYS, not by the route checks. Verified by
+  removing the checks: the inserts still failed, just with a worse error.
+- Closing the class therefore needs those FKs dropped — a migration — plus a
+  decision on whether a rule or grant may name a subject that does not exist
+  (a pending-invite model).
+- "May one account holder learn whether an email has a FAM account?" is a
+  product decision, not an implementation one.
+- No test enshrines the current behaviour, deliberately.
+
+**Also fixed:** `/admin/api/permissions` caught EVERY error and reported 409
+Conflict, so a foreign-key violation read as "rule already exists" — which is
+what made the ineffective fix above look like it had worked. Only a genuine
+duplicate is a conflict now.
+
 ### Retention Compares Instants, Not Strings (LOCKED)
 - `deleteOlderThan` compared `sent_at` against `datetime('now','-N days')`,
   which yields a SPACE-separated string. FAM writes the same shape, so the

@@ -559,7 +559,9 @@ describe('FAM Server Integration', () => {
       grantee_account_id: ownerAccount,
       entity_id: shared,
     });
-    expect(notMine).toBe(403);
+    // 404, not 403. "Not yours" and "does not exist" now answer identically —
+    // the difference between them was an entity-enumeration oracle.
+    expect(notMine).toBe(404);
 
     // List grants given
     const { status: ls, data: ld } = await api('/admin/api/grants/list', {
@@ -683,7 +685,10 @@ describe('FAM Server Integration', () => {
       source_account_id: otherAccount,
       action: 'deny',
     });
-    expect(foreignTarget).toBe(403);
+    // 404 for the same reason: a rule's target is always one of your own, so
+    // distinguishing another account's entity from a nonexistent one only ever
+    // told a prober which ids are real.
+    expect(foreignTarget).toBe(404);
 
     // List
     const { status: ls, data: ld } = await api('/admin/api/permissions/list', {
@@ -1175,6 +1180,56 @@ describe('FAM Server Integration', () => {
       }
       expect(forged).toEqual([]);
     });
+  });
+
+  // -- Admin API existence oracles -------------------------------------------
+  //
+  // The directory-scoping ruling says no cross-account enumeration. An admin
+  // surface is the classic place that leaks back in — not via a list, but via
+  // an ERROR that distinguishes "does not exist" from "exists but is not
+  // yours". A caller who can tell those apart can enumerate by probing.
+
+  describe('admin API does not disclose existence across accounts', () => {
+    const probeToken = 'oracle-probe-token';
+    const probeAccount = 'oracleprobe@example.com';
+    const victimToken = 'oracle-victim-token';
+    const victimAccount = 'oraclevictim@example.com';
+    let victimEntity: string;
+
+    beforeAll(async () => {
+      await seedAccount(probeAccount, probeToken);
+      await seedAccount(victimAccount, victimToken);
+      const e = await createEntity(victimToken, 'oracle-victim-agent');
+      victimEntity = e.entity_id;
+    });
+
+    test('an entity id that exists elsewhere is indistinguishable from one that does not', async () => {
+      const real = await rawApi('/admin/api/grants', {
+        account_token: probeToken,
+        grantee_account_id: 'someone-else@example.com',
+        entity_id: victimEntity, // exists, belongs to another account
+      });
+      const fake = await rawApi('/admin/api/grants', {
+        account_token: probeToken,
+        grantee_account_id: 'someone-else@example.com',
+        entity_id: 'ghost@nowhere.example.com', // does not exist
+      });
+
+      // If these differ, the difference IS the oracle.
+      expect(real.status).toBe(fake.status);
+    });
+
+    // NOT ASSERTED HERE, and deliberately no test enshrines it: existence of a
+    // FOREIGN subject is still disclosed. Creating a grant answers 201 vs 404
+    // on whether the grantee account exists, and a permission rule does the
+    // same for its source entity/account.
+    //
+    // All three are enforced by FOREIGN KEYS, not by the route checks — I
+    // removed the checks to test that and the inserts still failed, just with a
+    // worse error. Closing the class needs those FKs dropped, which is a
+    // migration, and "may one account holder learn whether an email has a FAM
+    // account" is a product decision. Recorded in ROADMAP as a Phase 4
+    // question.
   });
 
   // -- WebSocket version handshake -------------------------------------------

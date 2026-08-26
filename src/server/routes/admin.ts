@@ -66,12 +66,14 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
         }
 
         // Entity must exist and belong to the granting account
+        // One answer for "does not exist" and "is not yours". You can only
+        // grant your own entity, so the distinction serves no caller — and a
+        // caller who can tell them apart can enumerate every entity id on the
+        // server by probing, which is exactly what the directory-scoping ruling
+        // forbids.
         const entity = ctx.entities.getById(entityId);
-        if (!entity) {
-          throw new NotFoundError('Entity', entityId);
-        }
-        if (entity.account_id !== grantorAccountId) {
-          throw new ForbiddenError('Entity does not belong to your account');
+        if (!entity || entity.account_id !== grantorAccountId) {
+          throw new NotFoundError('Entity in your account', entityId);
         }
 
         // Grantee account must exist
@@ -201,12 +203,10 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
             throw new ValidationError('target_entity_id required when target_type is "entity"');
           }
           validateEntityId(target_entity_id);
+          // Same collapse as grants: the target is always one of your own.
           const target = ctx.entities.getById(target_entity_id);
-          if (!target) {
-            throw new NotFoundError('Entity', target_entity_id);
-          }
-          if (target.account_id !== accountId) {
-            throw new ForbiddenError('Target entity does not belong to your account');
+          if (!target || target.account_id !== accountId) {
+            throw new NotFoundError('Entity in your account', target_entity_id);
           }
         }
 
@@ -216,6 +216,12 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
             throw new ValidationError('source_entity_id required when source_type is "entity"');
           }
           validateEntityId(source_entity_id);
+          // NOTE: this check does not create the enumeration oracle, it only
+          // reports it clearly. `permissions.source_entity_id` carries a
+          // FOREIGN KEY, so removing this check does not let a rule name a
+          // nonexistent subject — the insert fails at the database instead and
+          // surfaces as a confusing 409. Closing the oracle requires dropping
+          // that FK, which is a migration and a design decision. See ROADMAP.
           if (!ctx.entities.getById(source_entity_id)) {
             throw new NotFoundError('Entity', source_entity_id);
           }
@@ -224,6 +230,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
             throw new ValidationError('source_account_id required when source_type is "account"');
           }
           validateAccountId(source_account_id);
+          // Same as above: FK-enforced regardless of this check.
           if (!ctx.accounts.exists(source_account_id)) {
             throw new NotFoundError('Account', source_account_id);
           }
@@ -240,8 +247,15 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
             source_account_id: source_account_id ?? null,
             action,
           });
-        } catch {
-          throw new ConflictError('Rule for this (target, source) tuple already exists — delete it first if you want to change its action');
+        } catch (e) {
+          // Only a genuine duplicate is a conflict. This used to catch every
+          // error and report 409, which turned a foreign-key violation into
+          // "rule already exists" — and made a fix that did not work look like
+          // one that did.
+          if (e instanceof Error && e.message === 'conflict') {
+            throw new ConflictError('Rule for this (target, source) tuple already exists — delete it first if you want to change its action');
+          }
+          throw e;
         }
 
         return new Response(

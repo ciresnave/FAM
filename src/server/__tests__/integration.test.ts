@@ -1177,6 +1177,74 @@ describe('FAM Server Integration', () => {
     });
   });
 
+  // -- WebSocket version handshake -------------------------------------------
+  //
+  // Inbound FRAMES were already version-checked, but only once the socket was
+  // open — so a client newer than the server connected successfully and then
+  // failed frame by frame, staying connected in a state where nothing worked.
+  // Negotiation belongs at connect: refuse before the socket exists, with a
+  // reason, rather than after with an error per message.
+
+  describe('websocket rejects a client newer than the server', () => {
+    let wsEntity: string;
+    let wsSession: string;
+
+    beforeAll(async () => {
+      const e = await createEntity(testToken, 'ws-handshake');
+      wsEntity = e.entity_id;
+      wsSession = await seedSession(wsEntity);
+    });
+
+    const upgradeUrl = (version?: string) => {
+      const u = new URL(`${TEST_SERVER_URL}/ws`);
+      u.searchParams.set('entity_id', wsEntity);
+      u.searchParams.set('session_id', wsSession);
+      if (version !== undefined) u.searchParams.set('version', version);
+      return u.toString();
+    };
+
+    // A plain GET reaches the same pre-upgrade code path a real handshake does.
+    // A request that PASSES every check then fails at server.upgrade() because
+    // this is not a real WebSocket handshake — so 500 here means "got past the
+    // version check", which is exactly what distinguishes accept from reject.
+    const attempt = async (version?: string) => (await fetch(upgradeUrl(version))).status;
+
+    test('a version newer than the server is refused before the socket opens', async () => {
+      expect(await attempt('999.0.0')).toBe(426);
+    });
+
+    test('the refusal is distinguishable from an auth failure', async () => {
+      const badVersion = await attempt('999.0.0');
+      const badSession = (
+        await fetch(`${TEST_SERVER_URL}/ws?entity_id=${encodeURIComponent(wsEntity)}&session_id=nope`)
+      ).status;
+
+      // 426 vs 401: a client that cannot tell "you are too new" from "your
+      // session is bad" will retry forever against the wrong problem.
+      expect(badVersion).not.toBe(badSession);
+      expect(badSession).toBe(401);
+    });
+
+    test('the current version gets past the version check', async () => {
+      const { FAM_VERSION } = await import('../../utils/versioning');
+      expect(await attempt(FAM_VERSION)).toBe(500); // reached upgrade, not rejected
+    });
+
+    test('an older client is accepted — the contract is newer-than-server only', async () => {
+      expect(await attempt('0.0.1')).toBe(500);
+    });
+
+    // The versioning contract treats an absent version as compatible, because
+    // it predates versioning. Connecting must not require it.
+    test('a client that sends no version is still accepted', async () => {
+      expect(await attempt(undefined)).toBe(500);
+    });
+
+    test('a malformed version is refused rather than silently accepted', async () => {
+      expect(await attempt('not-a-version')).toBe(426);
+    });
+  });
+
   // -- Concurrent admin operations -------------------------------------------
   //
   // WHICH ORDERINGS THIS HARNESS CAN PRODUCE, stated up front because a

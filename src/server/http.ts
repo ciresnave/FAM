@@ -12,6 +12,7 @@ import { ipRateLimiter, entityRateLimiter, getClientIp, RateLimitError } from '.
 import { assignRequestId, getRequestId } from './middleware/requestId';
 import { RequestEntityTooLargeError, ValidationError } from '../types/errors';
 import { logger } from '../utils/logger';
+import { isClientVersionSupported, FAM_VERSION } from '../utils/versioning';
 import { DEFAULT_PORT } from '../config';
 
 // ============================================================================
@@ -107,6 +108,22 @@ export function startServer(config: ServerConfig): void {
         
         if (!entityId || !sessionId) {
           return new Response('Missing entity_id or session_id', { status: 400 });
+        }
+
+        // Version negotiation happens HERE, before the socket exists. Inbound
+        // frames were already version-checked, but only once connected — so a
+        // client newer than this server used to connect fine and then fail
+        // frame by frame, staying attached in a state where nothing worked.
+        //
+        // 426 deliberately, not 400 or 401: a client must be able to tell
+        // "you are too new for this server" from "your session is bad", or it
+        // retries forever against the wrong problem.
+        const clientVersion = url.searchParams.get('version');
+        if (!isClientVersionSupported(clientVersion)) {
+          return new Response(
+            `Client version ${clientVersion} is not supported by this server (max ${FAM_VERSION})`,
+            { status: 426 }
+          );
         }
         
         // Validate session exists and belongs to this entity

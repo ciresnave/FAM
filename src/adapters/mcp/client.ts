@@ -13,6 +13,7 @@ import type {
   WebSocketMessagePush,
 } from '../../types';
 import { base64ToBuffer } from '../../crypto/keys';
+import { FAM_VERSION } from '../../utils/versioning';
 import { DEFAULT_SERVER_URL, DEFAULT_WS_URL } from '../../config';
 
 // ============================================================================
@@ -409,6 +410,9 @@ export class FamClient {
     const url = new URL(this.wsUrl);
     url.searchParams.set('entity_id', this.entityId);
     url.searchParams.set('session_id', this.sessionId);
+    // Declare our version so the server can refuse at connect rather than
+    // accepting us and failing every frame.
+    url.searchParams.set('version', FAM_VERSION);
     
     this.ws = new WebSocket(url.toString());
     

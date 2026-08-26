@@ -47,6 +47,26 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### WebSocket Version Handshake (LOCKED)
+- The client declares `version` on the `/ws` URL; the server refuses a client
+  NEWER than itself during the HTTP upgrade, before the socket exists.
+- Previously only inbound FRAMES were version-checked, and only once
+  connected — so a newer client connected successfully and then failed frame by
+  frame, staying attached in a state where nothing worked.
+- **426 deliberately**, not 400 or 401. A client that cannot distinguish "you
+  are too new for this server" from "your session is bad" retries forever
+  against the wrong problem. Asserted by test that the two differ.
+- Absent version is accepted: the versioning contract treats a missing version
+  as predating versioning, so requiring it would lock out exactly the clients it
+  is meant to accommodate.
+- **Malformed versions are refused, not treated as ancient.** `compareSemver`
+  uses `parseInt(n) || 0`, so `"not-a-version"` parses as `0.0.0` and compares
+  as OLDER than everything — lenient parsing is right for ordering two versions
+  FAM produced and wrong for validating one a client supplied. `isValidSemver`
+  gates it.
+- Mutation-verified: removing the shape check reddens the malformed-version
+  test.
+
 ### Concurrent Admin Ops (LOCKED)
 - Every `/admin/api/*` handler has exactly ONE `await` (`requireAccount`);
   every read, conflict check and write after it is synchronous. So concurrent
@@ -370,10 +390,6 @@ sign-off.
   no vite): entity CRUD, grants UI, permission matrix UI, availability
   toggle, directory view.
 
-### Phase 5 — Versioning Completion (partial)
-- Server-secret rotation is DONE — see Key Rotation under Completed.
-- **Remaining:** WS envelope — client sends `version` on connect; reject
-  newer-than-server.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
 - Migration matrix: fresh → current, each older version → current.

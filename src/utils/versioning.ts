@@ -54,6 +54,37 @@ export function compareSemver(a: string, b: string): number {
   return pa.prerelease.localeCompare(pb.prerelease);
 }
 
+/**
+ * Does this string actually look like a semantic version?
+ *
+ * compareSemver() is deliberately lenient — it uses `parseInt(n) || 0`, so
+ * "not-a-version" parses as 0.0.0 and compares as OLDER than everything. That
+ * is fine for ordering two versions FAM produced, and wrong for validating one
+ * a client supplied: garbage would be accepted as ancient rather than refused.
+ */
+export function isValidSemver(version: string): boolean {
+  return /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version);
+}
+
+/**
+ * Can this server talk to a client declaring `version`?
+ *
+ * - absent  -> yes. The versioning contract treats a missing version as
+ *              predating versioning, and those clients are compatible.
+ * - older / equal -> yes.
+ * - newer   -> no. A newer client may send frames this server cannot parse;
+ *              refusing at connect beats failing frame by frame afterwards.
+ * - malformed -> no. Not silently treated as 0.0.0.
+ */
+export function isClientVersionSupported(
+  version: string | null | undefined,
+  maxVersion: string = FAM_VERSION
+): boolean {
+  if (version === null || version === undefined || version === '') return true;
+  if (!isValidSemver(version)) return false;
+  return compareSemver(version, maxVersion) <= 0;
+}
+
 // ============================================================================
 // Stamp & Validate
 // ============================================================================

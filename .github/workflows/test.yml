@@ -1,0 +1,47 @@
+name: test
+
+# Deliberately narrow: typecheck and the test suite, nothing else.
+#
+# Before this, FAM had 192 tests and nothing executed them on a pull request.
+# The checks that did report were third-party review apps — they answer "did an
+# external reviewer object", not "does this work". A green from them is evidence
+# about a different question, which is worse than no evidence because it reads
+# like the same thing.
+#
+# This workflow is NOT configured as a required check. It reports; a human still
+# decides. Nothing here should be trusted until it has been seen to go red from
+# the runner — a workflow that has never failed is indistinguishable from one
+# that cannot.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned, not `latest`. Every "192 pass" reported for this repo was
+          # measured on 1.3.14; a floating runner version would mean CI and the
+          # developer's machine are different instruments reporting the same
+          # number. Bump this deliberately, having run the suite on the new
+          # version first.
+          bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      # `bun run test`, NOT `bun test`. Bun does not honour bunfig's
+      # [test] timeout, so bare `bun test` fails three integration tests on the
+      # 5s default. The script passes --timeout 60000 explicitly.
+      - name: Tests
+        run: bun run test

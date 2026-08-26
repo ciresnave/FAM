@@ -304,7 +304,7 @@ export class MessageRepository {
   deleteOlderThan(days: number): number {
     const stmt = this.db.prepare(`
       DELETE FROM messages
-      WHERE sent_at < datetime('now', '-' || ? || ' days')
+      WHERE julianday(sent_at) < julianday('now', '-' || ? || ' days')
     `);
 
     const result = stmt.run(days);

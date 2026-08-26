@@ -47,6 +47,22 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Retention Compares Instants, Not Strings (LOCKED)
+- `deleteOlderThan` compared `sent_at` against `datetime('now','-N days')`,
+  which yields a SPACE-separated string. FAM writes the same shape, so the
+  comparison happened to be right — a correctness that depended on both sides
+  being spelled the same way rather than on either being correct.
+- It broke for ISO-8601 (`T`/`Z`) rows on the CUTOFF DAY only: `'T'` (0x54)
+  sorts above `' '` (0x20), so such a row is retained however old it is.
+  Demonstrated — a row an hour older than the cutoff survived while the same
+  instant in native shape was swept.
+- Latent, not live: FAM writes only native-shape timestamps today. It becomes
+  reachable the moment a row carries ISO-8601 — a federation import, a
+  client-supplied timestamp, or a restored backup.
+- `julianday()` on both sides. Same defect and same fix as the claude-peers
+  broker retention sweep; found by checking whether FAM had the bug rather than
+  assuming it did not.
+
 ### WebSocket Version Handshake (LOCKED)
 - The client declares `version` on the `/ws` URL; the server refuses a client
   NEWER than itself during the HTTP upgrade, before the socket exists.

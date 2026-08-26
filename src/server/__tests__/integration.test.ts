@@ -1177,6 +1177,142 @@ describe('FAM Server Integration', () => {
     });
   });
 
+  // -- Concurrent admin operations -------------------------------------------
+  //
+  // WHICH ORDERINGS THIS HARNESS CAN PRODUCE, stated up front because a
+  // concurrency test is only evidence about the interleavings it can reach:
+  //
+  // Every /admin/api/* handler has exactly ONE await — `requireAccount`, which
+  // parses the body and validates the token. Everything after it (the read, the
+  // conflict check, the write) is synchronous repo calls with no await between
+  // them. So concurrent requests can interleave ONLY at that auth boundary:
+  //
+  //     A-auth A-op B-auth B-op        reachable
+  //     A-auth B-auth A-op B-op        reachable
+  //     A-auth B-auth B-op A-op        reachable
+  //     A-read B-read A-write B-write  NOT REACHABLE — the op body cannot yield
+  //
+  // The fourth is the one that would break these invariants, and the event loop
+  // cannot produce it. That is a fact about THIS server, not about the code:
+  // it would become reachable with more than one process against the same
+  // database, or with federation. Recorded on that basis rather than "fixed".
+  //
+  // These are therefore EVIDENCE, not DEMONSTRATION: they confirm the
+  // invariants held across the orderings that occurred, and the reasoning above
+  // is what says the unreachable one is unreachable.
+  //
+  // Each test below is additionally labelled by WHAT HOLDS THE INVARIANT, which
+  // is not the same question and is not visible from a passing run. Mutating
+  // the handler to yield between check and write reddened the permissions test
+  // and NOT the grants one — because grants has a UNIQUE constraint and
+  // permissions did not. Two tests that read identically, one verifying code
+  // and one verifying the schema.
+
+  describe('concurrent admin operations preserve their invariants', () => {
+    const adminToken = 'concurrent-admin-token';
+    const adminAccount = 'concurrent@example.com';
+    const otherAccount = 'concurrent-other@example.com';
+    let sharedEntity: string;
+
+    beforeAll(async () => {
+      await seedAccount(adminAccount, adminToken);
+      await seedAccount(otherAccount, 'concurrent-other-token');
+      const e = await createEntity(adminToken, 'concurrent-target');
+      sharedEntity = e.entity_id;
+    });
+
+    // SCHEMA-ENFORCED, not code-enforced — and I only know that because I
+    // mutated it. Opening a yield between the conflict check and the write did
+    // NOT redden this test, because `grants` carries
+    // UNIQUE(grantor_account_id, grantee_account_id, entity_id) and the
+    // database refuses the second row regardless of how the code behaves.
+    //
+    // So this asserts that the CONSTRAINT exists and works. It says nothing
+    // about the handler being atomic, despite reading as though it does. Kept
+    // for what it does verify, labelled for what it does not.
+    test('SCHEMA-ENFORCED: racing identical grant creates leaves exactly one grant', async () => {
+      const attempts = Array.from({ length: 20 }, () =>
+        rawApi('/admin/api/grants', {
+          account_token: adminToken,
+          grantee_account_id: otherAccount,
+          entity_id: sharedEntity,
+        })
+      );
+      const results = await Promise.all(attempts);
+
+      const created = results.filter((r) => r.status === 201).length;
+      const rows = getDatabaseContext()
+        .db.prepare(
+          'SELECT COUNT(*) c FROM grants WHERE grantor_account_id = ? AND grantee_account_id = ? AND entity_id = ?'
+        )
+        .get(adminAccount, otherAccount, sharedEntity) as { c: number };
+
+      // The invariant is the row count, not the response codes: however the
+      // requests interleaved, one grant must exist.
+      expect(rows.c).toBe(1);
+      expect(created).toBe(1);
+    });
+
+    // CODE-ENFORCED UNTIL v8, NOW ALSO SCHEMA-ENFORCED. This one does redden
+    // when the window is opened: 20 concurrent requests produced 4 duplicate
+    // rules. That is what distinguished it from the grants test above, and it
+    // is why migration v8 added a UNIQUE expression index — the invariant the
+    // permission resolver relies on ("ties at equal specificity are
+    // impossible") was asserted in a comment and enforced by nothing.
+    test('MUTATION-VERIFIED: racing identical permission rules leaves exactly one rule', async () => {
+      const attempts = Array.from({ length: 20 }, () =>
+        rawApi('/admin/api/permissions', {
+          account_token: adminToken,
+          target_type: 'all',
+          source_type: 'account',
+          source_account_id: otherAccount,
+          action: 'deny',
+        })
+      );
+      const results = await Promise.all(attempts);
+
+      const created = results.filter((r) => r.status === 201).length;
+      const rows = getDatabaseContext()
+        .db.prepare(
+          `SELECT COUNT(*) c FROM permissions
+           WHERE account_id = ? AND target_type = 'all' AND source_type = 'account'
+             AND source_account_id = ?`
+        )
+        .get(adminAccount, otherAccount) as { c: number };
+
+      // `permissions` has no UNIQUE constraint — this invariant is held by
+      // findIdentical-then-insert being uninterruptible, NOT by the schema.
+      // That distinction is the whole reason this test exists.
+      expect(rows.c).toBe(1);
+      expect(created).toBe(1);
+    });
+
+    test('EVIDENCE: a grant racing its own revocation never ends up both', async () => {
+      for (let round = 0; round < 10; round++) {
+        const ctxNow = getDatabaseContext();
+        ctxNow.db.prepare('DELETE FROM grants WHERE entity_id = ?').run(sharedEntity);
+        const grant = ctxNow.grants.create(adminAccount, otherAccount, sharedEntity);
+
+        await Promise.all([
+          rawApi('/admin/api/grants/revoke', { account_token: adminToken, grant_id: grant.id }),
+          rawApi('/admin/api/grants', {
+            account_token: adminToken,
+            grantee_account_id: otherAccount,
+            entity_id: sharedEntity,
+          }),
+        ]);
+
+        const states = ctxNow.db
+          .prepare('SELECT status FROM grants WHERE entity_id = ?')
+          .all(sharedEntity) as Array<{ status: string }>;
+
+        // Whatever the ordering: never two rows for the tuple, and never a row
+        // that is simultaneously revoked and honoured.
+        expect(states.length).toBeLessThanOrEqual(1);
+      }
+    });
+  });
+
   // -- Reconnect classification inputs ---------------------------------------
   //
   // The MCP client treats 404 and 401 from /entities/connect as PERMANENT and

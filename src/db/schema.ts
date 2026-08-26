@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -318,6 +318,36 @@ const MIGRATIONS: Record<number, string[]> = {
      FROM messages m
      JOIN channel_members cm ON cm.channel_id = m.channel_id
      WHERE m.channel_id IS NOT NULL AND cm.entity_id != m.from_entity`,
+  ],
+  8: [
+    // Make the permission-rule uniqueness invariant SCHEMA-enforced.
+    //
+    // It was held only by permissions.create() doing findIdentical-then-insert
+    // with no await between them — true today because that is uninterruptible
+    // against the event loop, but a property of the current single-process
+    // server rather than of the data. Demonstrated: opening that window
+    // produces 4 duplicate rules from 20 concurrent requests.
+    //
+    // It also matters for the permission RESOLVER, which documents that ties at
+    // equal specificity are impossible because the tuple is unique. That
+    // comment asserted an invariant nothing enforced.
+    //
+    // Dedupe before indexing — an existing duplicate would abort the migration.
+    // Keep the earliest row per tuple: it is the one whose effect callers have
+    // already observed.
+    `DELETE FROM permissions WHERE rowid NOT IN (
+       SELECT MIN(rowid) FROM permissions
+       GROUP BY account_id, target_type, COALESCE(target_entity_id, ''),
+                source_type, COALESCE(source_entity_id, ''),
+                COALESCE(source_account_id, '')
+     )`,
+    // COALESCE, not the bare columns: three of them are nullable, and SQLite
+    // treats NULL as distinct from NULL in a UNIQUE index — so a plain unique
+    // index would permit exactly the duplicates this exists to prevent.
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_permissions_tuple ON permissions(
+       account_id, target_type, COALESCE(target_entity_id, ''),
+       source_type, COALESCE(source_entity_id, ''), COALESCE(source_account_id, '')
+     )`,
   ],
 };
 

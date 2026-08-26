@@ -47,6 +47,44 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Concurrent Admin Ops (LOCKED)
+- Every `/admin/api/*` handler has exactly ONE `await` (`requireAccount`);
+  every read, conflict check and write after it is synchronous. So concurrent
+  requests interleave only at the auth boundary, and the ordering that would
+  break these invariants — read, read, write, write — cannot occur in a single
+  process. Recorded as a property of THIS server, not of the code: more than
+  one process against the same database, or federation, makes it reachable.
+- **Mutation changed the conclusion, twice.**
+  - Opening a yield between check and write did NOT redden the grants test —
+    `grants` carries `UNIQUE(grantor, grantee, entity)` and the database
+    refuses the second row regardless of the code. That test verifies the
+    CONSTRAINT, not the handler, despite reading as though it verifies both.
+  - The same mutation DID redden the permissions test: 20 concurrent requests
+    produced **4 duplicate rules**. That invariant was held by code atomicity
+    alone.
+- **Migration v8** adds a UNIQUE expression index over the permission tuple,
+  using `COALESCE` on the three nullable columns — SQLite treats NULL as
+  distinct from NULL in a UNIQUE index, so a plain one would permit exactly the
+  duplicates it exists to prevent. Verified: with the yield re-opened AND the
+  index present, the invariant holds.
+- This also repairs a claim the permission resolver already relied on — its
+  comment says ties at equal specificity are impossible "because the tuple is
+  unique". Nothing enforced that until v8.
+- Reversal of an earlier decision, deliberately: this gap was previously
+  recorded-not-fixed on the grounds that a fix which cannot be born-red should
+  not ship. The mutation supplied the born-red, so the reason not to fix it
+  no longer applied.
+- Two test-harness defects surfaced while doing this and are worth keeping:
+  - A rewind test deleted only its exact `schema_version` row, so a LATER
+    migration left `MAX(version)` untouched and the migration under test never
+    re-ran — the test passed while exercising nothing. Rewinds now delete
+    `>= target`.
+  - The "v5 database" fixture omitted the `permissions` table, which a genuine
+    v5 database has from migration 3. It was a database that could never have
+    existed; migration 8 exposed it.
+  - Migration 8 was not re-appliable until the fixed rewind test re-ran it.
+    Now `IF NOT EXISTS`.
+
 ### Send-Path Atomicity (LOCKED)
 - **The authorizing check and the row it authorizes are now committed
   together.** `sendDirectMessage` checked the permission synchronously and then
@@ -72,11 +110,8 @@ sign-off.
   Prefer an INVARIANT over a SEQUENCE: "no message exists that only a revoked
   grant would have permitted" can fail for the right reason; "revocation lands
   before the read" passes by luck.
-- Related, and deliberately NOT changed: `permissions.create` does
-  check-then-insert with no `await` between them, so it is atomic against the
-  event loop in a single process. It is still unguarded at the schema level
-  (no UNIQUE constraint), which would matter across processes. Recorded rather
-  than fixed.
+- Related: `permissions.create` was atomic only against the event loop.
+  Superseded — migration v8 makes it schema-enforced. See Concurrent Admin Ops.
 
 ### MCP Reconnect (LOCKED)
 - **Permanent failures stop reconnecting.** `attemptReconnect` caught every
@@ -341,8 +376,6 @@ sign-off.
   newer-than-server.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
-- Admin edge cases: concurrent admin ops (grant revocation during an active DM
-  is closed — see Send-Path Atomicity).
 - Migration matrix: fresh → current, each older version → current.
 - Availability + directory scoping coverage.
 

@@ -3,14 +3,14 @@ import { Database } from 'bun:sqlite';
 import { initializeDatabase } from '../schema';
 
 describe('Schema Migrations', () => {
-  test('fresh database initializes at current schema version with v2-v7 objects', () => {
+  test('fresh database initializes at current schema version with v2-v8 objects', () => {
     const db = new Database(':memory:');
     initializeDatabase(db);
 
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(7);
+    expect(version.version).toBe(8);
 
     // v2 columns exist on all three tables
     for (const table of ['entities', 'channels', 'messages']) {
@@ -107,7 +107,7 @@ describe('Schema Migrations', () => {
     const version = db1
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(7);
+    expect(version.version).toBe(8);
 
     // v2 columns now exist and pre-existing data survived
     const cols = db1
@@ -211,7 +211,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(7);
+    expect(version.version).toBe(8);
 
     // The ambiguous row survived, normalized: target_entity_id and
     // source_entity_id stripped per the rule shape
@@ -236,6 +236,22 @@ describe('Schema Migrations', () => {
         updated_at TEXT DEFAULT (datetime('now'))
       );
       CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')));
+      -- A genuine v5 database has run migration 3, so it HAS these tables.
+      -- Omitting them made this a database that could never have existed, and
+      -- migration 8 (which indexes permissions) exposed that rather than any
+      -- defect in the migration itself.
+      CREATE TABLE IF NOT EXISTS permissions (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_entity_id TEXT,
+        source_type TEXT NOT NULL,
+        source_entity_id TEXT,
+        source_account_id TEXT,
+        action TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        created_by_entity TEXT
+      );
       INSERT INTO schema_version (version) VALUES (5);
       INSERT INTO accounts (id, display_name) VALUES ('legacy@example.com', 'Legacy');
     `);
@@ -245,7 +261,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(7);
+    expect(version.version).toBe(8);
 
     const cols = db.query('PRAGMA table_info(accounts)').all() as { name: string }[];
     const names = cols.map((c) => c.name);
@@ -291,7 +307,11 @@ describe('Schema Migrations', () => {
 
     // Rewind to v6 so migration 7 runs against data created without it.
     db.run('DROP TABLE IF EXISTS message_deliveries');
-    db.run('DELETE FROM schema_version WHERE version = 7');
+    // >= 7, not = 7. Deleting only the exact version leaves any LATER version
+    // stamped, so MAX(version) never drops and the migration under test never
+    // re-runs — the test then passes while exercising nothing. This broke the
+    // moment v8 landed.
+    db.run('DELETE FROM schema_version WHERE version >= 7');
 
     db.run(`INSERT INTO accounts (id) VALUES ('v7@example.com')`);
     for (const who of ['a', 'b', 'c']) {
@@ -315,7 +335,7 @@ describe('Schema Migrations', () => {
     initializeDatabase(db);
 
     const version = db.query('SELECT MAX(version) as version FROM schema_version').get() as { version: number };
-    expect(version.version).toBe(7);
+    expect(version.version).toBe(8);
 
     // DM: exactly one recipient, and the old flag is preserved.
     const dm = db

@@ -33,17 +33,32 @@ export class MessageRepository {
   /**
    * Send a direct message to an entity.
    */
-  async sendDirectMessage(fromEntityId: EntityId, toEntityId: EntityId, text: string): Promise<Message> {
-    const encryptedText = ENCRYPT_MESSAGES && SERVER_SECRET
-      ? await encryptMessage(text, KEYRING)
-      : text;
-    
+  /**
+   * Encrypt if enabled. Split out from the insert deliberately: this is the
+   * only asynchronous part of sending, and an `await` between an authorization
+   * check and the row it authorizes is a window another request can act in.
+   * Callers that care do this FIRST, then check and insert with no await
+   * between them.
+   */
+  async prepareStoredText(text: string): Promise<string> {
+    return ENCRYPT_MESSAGES && SERVER_SECRET ? await encryptMessage(text, KEYRING) : text;
+  }
+
+  /**
+   * Insert a direct message. SYNCHRONOUS on purpose — see prepareStoredText.
+   */
+  insertDirectMessage(
+    fromEntityId: EntityId,
+    toEntityId: EntityId,
+    storedText: string,
+    plaintext: string
+  ): Message {
     const stmt = this.db.prepare(`
       INSERT INTO messages (from_entity, to_entity, text)
       VALUES (?, ?, ?)
     `);
 
-    const result = stmt.run(fromEntityId, toEntityId, encryptedText);
+    const result = stmt.run(fromEntityId, toEntityId, storedText);
     const messageId = result.lastInsertRowid as number;
 
     // One recipient, recorded explicitly so acknowledgement is per-entity.
@@ -54,29 +69,42 @@ export class MessageRepository {
       .run(messageId, toEntityId);
 
     const msg = this.getByIdRaw(messageId)!;
-    // Return with original text for immediate use
-    return { ...msg, text };
+    return { ...msg, text: plaintext };
+  }
+
+  /**
+   * Send a direct message to an entity.
+   */
+  async sendDirectMessage(fromEntityId: EntityId, toEntityId: EntityId, text: string): Promise<Message> {
+    return this.insertDirectMessage(
+      fromEntityId,
+      toEntityId,
+      await this.prepareStoredText(text),
+      text
+    );
   }
 
   /**
    * Send a message to a channel.
    */
-  async sendChannelMessage(fromEntityId: EntityId, channelId: ChannelId, text: string): Promise<Message> {
-    const encryptedText = ENCRYPT_MESSAGES && SERVER_SECRET
-      ? await encryptMessage(text, KEYRING)
-      : text;
-    
+  /**
+   * Insert a channel message and fan out delivery rows. SYNCHRONOUS on purpose.
+   */
+  insertChannelMessage(
+    fromEntityId: EntityId,
+    channelId: ChannelId,
+    storedText: string,
+    plaintext: string
+  ): Message {
     const stmt = this.db.prepare(`
       INSERT INTO messages (from_entity, channel_id, text)
       VALUES (?, ?, ?)
     `);
 
-    const result = stmt.run(fromEntityId, channelId, encryptedText);
+    const result = stmt.run(fromEntityId, channelId, storedText);
     const messageId = result.lastInsertRowid as number;
 
     // Fan out to the members as they are AT SEND TIME, excluding the sender.
-    // Doing this on send rather than on read is what stops a later joiner
-    // inheriting history that was never addressed to them.
     this.db
       .prepare(
         `INSERT OR IGNORE INTO message_deliveries (message_id, recipient_entity_id)
@@ -86,8 +114,19 @@ export class MessageRepository {
       .run(messageId, channelId, fromEntityId);
 
     const msg = this.getByIdRaw(messageId)!;
-    // Return with original text for immediate use
-    return { ...msg, text };
+    return { ...msg, text: plaintext };
+  }
+
+  /**
+   * Send a message to a channel.
+   */
+  async sendChannelMessage(fromEntityId: EntityId, channelId: ChannelId, text: string): Promise<Message> {
+    return this.insertChannelMessage(
+      fromEntityId,
+      channelId,
+      await this.prepareStoredText(text),
+      text
+    );
   }
 
   // --------------------------------------------------------------------------

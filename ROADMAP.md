@@ -47,6 +47,37 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Send-Path Atomicity (LOCKED)
+- **The authorizing check and the row it authorizes are now committed
+  together.** `sendDirectMessage` checked the permission synchronously and then
+  `await`ed the persist; a grant revoked in that window still produced a stored
+  message. Measured, not reasoned: 200/200 unforced attempts persisted a
+  message under a revoked grant.
+- Encryption — the only genuinely asynchronous part of sending — now happens
+  BEFORE the check. `prepareStoredText` is async; `insertDirectMessage` and
+  `insertChannelMessage` are synchronous, and the service wraps check-and-insert
+  in a transaction with no `await` between them.
+- Channel sends get the same treatment: membership is re-checked inside the
+  transaction.
+- Mutation-verified: restoring the `await` between check and insert reddens the
+  demonstration test.
+- **Test labelling convention, introduced here and to be kept.** Concurrency
+  tests are marked in the file, not the PR:
+  - `DEMONSTRATION` — the interleaving is forced, so it proves the window
+    exists and what happens in it. It says nothing about production frequency.
+    Where an ordering is forced, that is stated at the assertion.
+  - `EVIDENCE` — the interleaving is not forced. Passing means the invariant
+    held for the orderings that actually occurred, which is weaker than holding
+    for all of them.
+  Prefer an INVARIANT over a SEQUENCE: "no message exists that only a revoked
+  grant would have permitted" can fail for the right reason; "revocation lands
+  before the read" passes by luck.
+- Related, and deliberately NOT changed: `permissions.create` does
+  check-then-insert with no `await` between them, so it is atomic against the
+  event loop in a single process. It is still unguarded at the schema level
+  (no UNIQUE constraint), which would matter across processes. Recorded rather
+  than fixed.
+
 ### MCP Reconnect (LOCKED)
 - **Permanent failures stop reconnecting.** `attemptReconnect` caught every
   error identically, so a deleted entity (404) or a revoked one (401/403) was
@@ -310,7 +341,8 @@ sign-off.
   newer-than-server.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
-- Admin edge cases: grant revocation during active DM, concurrent admin ops.
+- Admin edge cases: concurrent admin ops (grant revocation during an active DM
+  is closed — see Send-Path Atomicity).
 - Migration matrix: fresh → current, each older version → current.
 - Availability + directory scoping coverage.
 

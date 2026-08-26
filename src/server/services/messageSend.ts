@@ -51,7 +51,19 @@ export class MessageSendService {
     }
 
     const trimmed = text.trim();
-    const message = await this.ctx.messages.sendDirectMessage(fromEntityId, toEntityId, trimmed);
+
+    // Encrypt BEFORE the authorizing check, then check and insert with no
+    // await between them. Previously the check ran, the persist was awaited,
+    // and a revocation landing in that window still produced a stored message
+    // — the grant said no by the time the row existed.
+    const storedText = await this.ctx.messages.prepareStoredText(trimmed);
+
+    const message = this.ctx.db.transaction(() => {
+      if (!this.permissionChecker.canDirectMessage(sender, recipient)) {
+        throw new ForbiddenError('Not permitted to message this entity');
+      }
+      return this.ctx.messages.insertDirectMessage(fromEntityId, toEntityId, storedText, trimmed);
+    })();
 
     // Push to recipient if online
     this.wsManager.pushToEntity(toEntityId, {
@@ -98,7 +110,17 @@ export class MessageSendService {
     const sender = this.ctx.entities.getById(fromEntityId)!;
 
     const trimmed = text.trim();
-    const message = await this.ctx.messages.sendChannelMessage(fromEntityId, channelId, trimmed);
+
+    // Same ordering as a DM: the membership that authorizes this send is
+    // re-checked with no await between the check and the row.
+    const storedText = await this.ctx.messages.prepareStoredText(trimmed);
+
+    const message = this.ctx.db.transaction(() => {
+      if (!this.ctx.channels.isMember(channelId, fromEntityId)) {
+        throw new EntityNotInChannelError(fromEntityId, channelId);
+      }
+      return this.ctx.messages.insertChannelMessage(fromEntityId, channelId, storedText, trimmed);
+    })();
 
     // Push to online channel members except the sender, skipping members
     // whose account has denied this sender by rule

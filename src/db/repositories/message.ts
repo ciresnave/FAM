@@ -2,14 +2,17 @@
 
 import { Database } from 'bun:sqlite';
 import type { Message, EntityId, ChannelId } from '../../types';
-import { encryptMessage, decryptMessage } from '../../crypto/message-encryption';
+import { encryptMessage, decryptMessage, keyringFromEnv } from '../../crypto/message-encryption';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 const ENCRYPT_MESSAGES = process.env.FAM_ENCRYPT_MESSAGES === 'true';
-const SERVER_SECRET = process.env.FAM_SERVER_SECRET || '';
+// The whole keyring, not just the current secret: after a rotation the backlog
+// is still sealed with retired keys and has to stay readable.
+const KEYRING = keyringFromEnv();
+const SERVER_SECRET = KEYRING.current;
 
 // ============================================================================
 // Message Repository
@@ -27,7 +30,7 @@ export class MessageRepository {
    */
   async sendDirectMessage(fromEntityId: EntityId, toEntityId: EntityId, text: string): Promise<Message> {
     const encryptedText = ENCRYPT_MESSAGES && SERVER_SECRET
-      ? await encryptMessage(text, SERVER_SECRET)
+      ? await encryptMessage(text, KEYRING)
       : text;
     
     const stmt = this.db.prepare(`
@@ -55,7 +58,7 @@ export class MessageRepository {
    */
   async sendChannelMessage(fromEntityId: EntityId, channelId: ChannelId, text: string): Promise<Message> {
     const encryptedText = ENCRYPT_MESSAGES && SERVER_SECRET
-      ? await encryptMessage(text, SERVER_SECRET)
+      ? await encryptMessage(text, KEYRING)
       : text;
     
     const stmt = this.db.prepare(`
@@ -308,7 +311,7 @@ export class MessageRepository {
     return Promise.all(
       messages.map(async (msg) => ({
         ...msg,
-        text: await decryptMessage(msg.text, SERVER_SECRET),
+        text: await decryptMessage(msg.text, KEYRING),
       }))
     );
   }

@@ -8,6 +8,7 @@
   "license": "MIT",
   "scripts": {
     "bootstrap": "bun run src/scripts/bootstrap.ts",
+    "rotate-key": "bun run src/scripts/rotate-key.ts",
     "dev": "bun run src/server/http.ts",
     "start": "bun run src/server/http.ts",
     "broker": "bun broker.ts",

@@ -159,6 +159,24 @@ export class UnverifiedEmailError extends FamError {
   }
 }
 
+/**
+ * A stored message names a key the server no longer holds.
+ *
+ * Dropping a retired secret from the keyring is how encrypted data becomes
+ * permanently unreadable, so this says exactly that rather than surfacing
+ * AES-GCM's "operation failed for an operation-specific reason".
+ */
+export class MessageKeyUnavailableError extends FamError {
+  constructor(keyId: string) {
+    super(
+      `Message was encrypted with key "${keyId}", which this server does not hold. ` +
+        `Add the retired secret to FAM_SERVER_SECRET_PREVIOUS to read it.`,
+      'MESSAGE_KEY_UNAVAILABLE',
+      500
+    );
+  }
+}
+
 export class UnsupportedFormatVersionError extends FamError {
   constructor(formatName: string, found: string, maxSupported: string) {
     super(

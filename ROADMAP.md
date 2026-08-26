@@ -47,6 +47,39 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Key Rotation (LOCKED)
+- **Rotating `FAM_SERVER_SECRET` is supported.** It was previously documented
+  as "don't" — a prohibition standing in for an unhandled case, because the
+  ciphertext envelope recorded no key identity and a stored message could not
+  say which secret sealed it.
+- Envelopes carry `kid`: a short, non-reversible HKDF fingerprint of the
+  secret. It travels in plaintext beside the ciphertext, so it is derived
+  rather than being any part of the secret.
+- `FAM_SERVER_SECRET_PREVIOUS` (comma-separated) holds retired secrets, kept
+  ONLY so messages sealed with them stay readable. New messages always use
+  `FAM_SERVER_SECRET`.
+- `bun run rotate-key` re-seals every message onto the current key. Idempotent
+  — rows already on the current `kid` are skipped, so an interrupted run is
+  simply repeated.
+- **Procedure, and step 4 is last, always:** move the old secret into
+  `FAM_SERVER_SECRET_PREVIOUS`; set the new `FAM_SERVER_SECRET`; run
+  `rotate-key`; only then drop the retired secret. Dropping it earlier makes
+  every message still sealed with it permanently unreadable.
+- An unknown `kid` raises `MessageKeyUnavailableError` naming the key and the
+  fix, rather than surfacing AES-GCM's "operation failed for an
+  operation-specific reason".
+- Envelopes with no `kid` predate rotation, so the current secret is their only
+  candidate — pre-rotation behaviour preserved.
+- Verified end to end across separate processes (env is read at load), with the
+  negative case as the discriminator: write under A; read with B alone FAILS
+  with the named error; read with B+A succeeds; rotate; **read with B alone
+  succeeds and A is no longer needed**; rerun is a no-op.
+- Mutation-verified: making key resolution ignore `kid` reddens three tests.
+- NOT covered: Ed25519 entity-key rotation. An entity's identity is
+  `name@account` and its key proves it, but `entities.public_key` is a single
+  column with no history, so rotating it invalidates in-flight challenges.
+  Separate problem, not started.
+
 ### Directory Scoping (LOCKED policy)
 - **No cross-account enumeration by default.** `scope: 'all'`, `'directory'`
   and an unset scope all resolve to the same visibility set: the caller's own
@@ -220,12 +253,10 @@ sign-off.
   no vite): entity CRUD, grants UI, permission matrix UI, availability
   toggle, directory view.
 
-### Phase 5 — Versioning Completion / Key Rotation
-- `key_id` in the versioned ciphertext envelope; HKDF salt per key version.
-- Key rotation CLI (`fam key rotate`) + migration to re-encrypt existing rows.
-- WS envelope: client sends `version` on connect; reject newer-than-server.
-- Document rotation procedure (current guidance: don't rotate; messages
-  become undecryptable).
+### Phase 5 — Versioning Completion (partial)
+- Server-secret rotation is DONE — see Key Rotation under Completed.
+- **Remaining:** WS envelope — client sends `version` on connect; reject
+  newer-than-server.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
 - Encryption toggle tests (enable/disable over existing data).

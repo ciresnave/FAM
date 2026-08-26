@@ -3,14 +3,20 @@
 // Encrypts message content in the database using AES-256-GCM.
 // Uses HKDF to derive a key from the server secret.
 //
-// NOTE: No key rotation support yet. Rotating FAM_SERVER_SECRET makes all
-// previously encrypted messages undecryptable. Messages written while
-// FAM_ENCRYPT_MESSAGES is disabled are stored as plaintext; enabling it
-// later does not retroactively encrypt old rows (reads decrypt only when
-// the flag is on, so mixed data must be avoided — pick a setting and keep it).
+// Rotation IS supported. Each envelope records `kid`, a non-reversible
+// fingerprint of the secret that sealed it, so a message can say which key it
+// needs. FAM_SERVER_SECRET_PREVIOUS holds retired secrets for reading; new
+// messages always use FAM_SERVER_SECRET. `bun run rotate-key` re-seals
+// everything onto the current key. See src/scripts/rotate-key.ts.
+//
+// Messages written while FAM_ENCRYPT_MESSAGES is disabled are stored as
+// plaintext; enabling it later does not retroactively encrypt old rows (reads
+// decrypt only when the flag is on, so mixed data must be avoided — pick a
+// setting and keep it).
 
 import { bufferToBase64, base64ToBuffer } from './argon2';
 import { stampVersion, assertFormatSupported, type Versioned } from '../utils/versioning';
+import { MessageKeyUnavailableError } from '../types/errors';
 
 // ============================================================================
 // Configuration
@@ -24,17 +30,19 @@ const KEY_LENGTH = 256;
 // Key Derivation
 // ============================================================================
 
-let cachedKey: CryptoKey | null = null;
-let cachedSalt: string | null = null;
+// Keyed by secret: rotation means more than one is live at a time, so a single
+// cached key would thrash between generations while a backlog is being read.
+const keyCache = new Map<string, CryptoKey>();
+const keyIdCache = new Map<string, string>();
 
 /**
  * Derive an AES-256-GCM key from the server secret using HKDF.
  */
 async function deriveKey(serverSecret: string): Promise<CryptoKey> {
   // Use a fixed salt for HKDF (derived from server secret hash)
-  if (cachedKey && cachedSalt === serverSecret) {
-    return cachedKey;
-  }
+  const cached = keyCache.get(serverSecret);
+  if (cached) return cached;
+
   
   // Import the server secret as raw key material
   const encoder = new TextEncoder();
@@ -50,7 +58,7 @@ async function deriveKey(serverSecret: string): Promise<CryptoKey> {
   const salt = encoder.encode('fam-message-encryption-salt-v1');
   const info = encoder.encode('fam-message-encryption-key');
   
-  cachedKey = await crypto.subtle.deriveKey(
+  const derived = await crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
@@ -63,8 +71,90 @@ async function deriveKey(serverSecret: string): Promise<CryptoKey> {
     ['encrypt', 'decrypt']
   );
   
-  cachedSalt = serverSecret;
-  return cachedKey;
+  keyCache.set(serverSecret, derived);
+  return derived;
+}
+
+/**
+ * Find the key a stored message was sealed with.
+ *
+ * An envelope with no `kid` predates rotation, so the current secret is the
+ * only candidate — that is the pre-rotation behaviour, preserved.
+ */
+async function resolveKeyFor(kid: string | undefined, keyring: Keyring): Promise<CryptoKey> {
+  if (!kid) return deriveKey(keyring.current);
+
+  for (const secret of [keyring.current, ...keyring.previous]) {
+    if ((await keyIdFor(secret)) === kid) return deriveKey(secret);
+  }
+
+  throw new MessageKeyUnavailableError(kid);
+}
+
+// ============================================================================
+// Keyring
+// ============================================================================
+export interface Keyring {
+  /** The secret new messages are sealed with. */
+  current: string;
+  /** Retired secrets, kept only so messages sealed with them stay readable. */
+  previous: string[];
+}
+
+function asKeyring(secretOrKeyring: string | Keyring): Keyring {
+  return typeof secretOrKeyring === 'string'
+    ? { current: secretOrKeyring, previous: [] }
+    : secretOrKeyring;
+}
+
+/**
+ * Build the keyring from the environment.
+ *
+ * FAM_SERVER_SECRET seals new messages. FAM_SERVER_SECRET_PREVIOUS is a
+ * comma-separated list of retired secrets, kept ONLY so messages sealed with
+ * them stay readable. Remove one and every message still sealed with it becomes
+ * permanently unreadable — run `bun run rotate-key` first, then drop it.
+ */
+export function keyringFromEnv(): Keyring {
+  const previous = (process.env.FAM_SERVER_SECRET_PREVIOUS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return { current: process.env.FAM_SERVER_SECRET ?? '', previous };
+}
+
+/**
+ * A short, stable, non-reversible fingerprint of a secret.
+ *
+ * Travels in plaintext beside the ciphertext, so it is derived rather than
+ * being any part of the secret itself.
+ */
+export async function keyIdFor(serverSecret: string): Promise<string> {
+  const memo = keyIdCache.get(serverSecret);
+  if (memo) return memo;
+
+  const encoder = new TextEncoder();
+  const material = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(serverSecret),
+    'HKDF',
+    false,
+    ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: encoder.encode('fam-key-id-salt-v1'),
+      info: encoder.encode('fam-key-id'),
+    },
+    material,
+    64
+  );
+  const kid = bufferToBase64(new Uint8Array(bits)).replace(/[+/=]/g, '').slice(0, 10);
+  keyIdCache.set(serverSecret, kid);
+  return kid;
 }
 
 // ============================================================================
@@ -79,6 +169,12 @@ async function deriveKey(serverSecret: string): Promise<CryptoKey> {
 export interface CiphertextEnvelope extends Versioned {
   iv: string; // base64-encoded 96-bit IV
   ct: string; // base64-encoded ciphertext
+  /**
+   * Which key sealed this. Absent on envelopes written before rotation
+   * existed — those predate any rotation, so the current secret is the only
+   * candidate for them.
+   */
+  kid?: string;
 }
 
 /**
@@ -105,9 +201,11 @@ function parseEnvelope(stored: string): CiphertextEnvelope | null {
  */
 export async function encryptMessage(
   plaintext: string,
-  serverSecret: string
+  serverSecret: string | Keyring
 ): Promise<string> {
-  const key = await deriveKey(serverSecret);
+  const keyring = asKeyring(serverSecret);
+  const key = await deriveKey(keyring.current);
+  const kid = await keyIdFor(keyring.current);
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 
   const encoder = new TextEncoder();
@@ -122,6 +220,7 @@ export async function encryptMessage(
   const envelope: CiphertextEnvelope = stampVersion({
     iv: bufferToBase64(iv),
     ct: bufferToBase64(new Uint8Array(ciphertext)),
+    kid,
   });
 
   return JSON.stringify(envelope);
@@ -137,23 +236,27 @@ export async function encryptMessage(
  */
 export async function decryptMessage(
   ciphertextBase64: string,
-  serverSecret: string
+  serverSecret: string | Keyring
 ): Promise<string> {
-  const key = await deriveKey(serverSecret);
+  const keyring = asKeyring(serverSecret);
 
   let iv: Uint8Array<ArrayBuffer>;
   let ciphertext: Uint8Array<ArrayBuffer>;
+  let key: CryptoKey;
 
   const envelope = parseEnvelope(ciphertextBase64);
   if (envelope) {
     assertFormatSupported(envelope, 'Message ciphertext envelope');
     iv = new Uint8Array(base64ToBuffer(envelope.iv));
     ciphertext = new Uint8Array(base64ToBuffer(envelope.ct));
+    key = await resolveKeyFor(envelope.kid, keyring);
   } else {
     // Legacy format: raw base64 of IV||ciphertext
     const combined = base64ToBuffer(ciphertextBase64);
     iv = new Uint8Array(combined.slice(0, IV_LENGTH));
     ciphertext = new Uint8Array(combined.slice(IV_LENGTH));
+    // Raw legacy bytes carry no key identity either.
+    key = await resolveKeyFor(undefined, keyring);
   }
 
   const decrypted = await crypto.subtle.decrypt(

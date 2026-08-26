@@ -1177,4 +1177,125 @@ describe('FAM Server Integration', () => {
       expect(legacyLeaked).toEqual([]);
     });
   });
+
+  // -- Directory scoping -----------------------------------------------------
+  //
+  // Ruling: no cross-account enumeration by default. A list of another
+  // account's entities leaks naming, structure, headcount and activity — the
+  // absence of message access does not make the directory harmless. And a
+  // scope value that returns everything regardless of grants would make the
+  // grant system govern delivery but not visibility: two different answers to
+  // "may A see B", with only one enforced.
+
+  describe('entities/list does not enumerate across accounts', () => {
+    const otherAccount = 'dirscope-other@example.com';
+    const otherToken = 'dirscope-other-token';
+    let mine: { entity_id: string };
+    let theirs: { entity_id: string };
+    let theirsGranted: { entity_id: string };
+    let mySession: string;
+    let channelId: string;
+
+    beforeAll(async () => {
+      await seedAccount(otherAccount, otherToken);
+      mine = await createEntity(testToken, 'dirscope-mine', 'pk', {
+        can_send: true,
+        can_create_channels: true,
+      });
+      theirs = await createEntity(otherToken, 'dirscope-theirs', 'pk');
+      theirsGranted = await createEntity(otherToken, 'dirscope-granted', 'pk');
+      mySession = await seedSession(mine.entity_id);
+
+      // Both of their entities exist; only one is shared with my account.
+      await seedGrant(otherAccount, testAccountId, theirsGranted.entity_id);
+
+      // Bring them online so scope:'online' has something to leak.
+      const ctx = getDatabaseContext();
+      for (const id of [theirs.entity_id, theirsGranted.entity_id, mine.entity_id]) {
+        ctx.entities.updateStatus(id, 'online');
+      }
+
+      const created = await rawApi('/channels/create', {
+        session_id: mySession,
+        name: 'dirscope-room',
+      });
+      channelId = created.data.channel.id;
+    });
+
+    const idsFrom = (data: any) => (data.entities as any[]).map((e) => e.id);
+
+    test("scope 'all' does not return another account's entities", async () => {
+      const { status, data } = await rawApi('/entities/list', {
+        session_id: mySession,
+        scope: 'all',
+      });
+      expect(status).toBe(200);
+      expect(idsFrom(data)).toContain(mine.entity_id);
+      expect(idsFrom(data)).not.toContain(theirs.entity_id);
+    });
+
+    test("scope 'all' does return an entity explicitly granted to me", async () => {
+      const { data } = await rawApi('/entities/list', {
+        session_id: mySession,
+        scope: 'all',
+      });
+      expect(idsFrom(data)).toContain(theirsGranted.entity_id);
+    });
+
+    test('the default scope does not enumerate across accounts either', async () => {
+      const { data } = await rawApi('/entities/list', { session_id: mySession });
+      expect(idsFrom(data)).not.toContain(theirs.entity_id);
+    });
+
+    // Same disclosure through a different parameter value would make the
+    // ruling decorative.
+    test("scope 'online' does not return another account's online entities", async () => {
+      const { data } = await rawApi('/entities/list', {
+        session_id: mySession,
+        scope: 'online',
+      });
+      expect(idsFrom(data)).not.toContain(theirs.entity_id);
+    });
+
+    test("scope 'channel' requires the caller to be a member", async () => {
+      const outsiderSession = await seedSession(theirs.entity_id);
+      const { status } = await rawApi('/entities/list', {
+        session_id: outsiderSession,
+        scope: 'channel',
+        channel_id: channelId,
+      });
+      expect(status).toBe(403);
+    });
+
+    test("scope 'channel' works for an actual member", async () => {
+      const { status, data } = await rawApi('/entities/list', {
+        session_id: mySession,
+        scope: 'channel',
+        channel_id: channelId,
+      });
+      expect(status).toBe(200);
+      expect(idsFrom(data)).toContain(mine.entity_id);
+    });
+
+    // Same disclosure via a different route. Closing it on /entities/list and
+    // leaving it open here would be the "two different answers to may A see B"
+    // problem the ruling is about.
+    test('/channels/list-members refuses a non-member on a private channel', async () => {
+      const outsiderSession = await seedSession(theirs.entity_id);
+      const { status } = await rawApi('/channels/list-members', {
+        session_id: outsiderSession,
+        channel_id: channelId,
+      });
+      expect(status).toBe(403);
+    });
+
+    test('/channels/list-members works for a member', async () => {
+      const { status, data } = await rawApi('/channels/list-members', {
+        session_id: mySession,
+        channel_id: channelId,
+      });
+      expect(status).toBe(200);
+      expect(data.members.length).toBeGreaterThan(0);
+    });
+  });
 });

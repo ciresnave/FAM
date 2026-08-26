@@ -47,6 +47,32 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### Directory Scoping (LOCKED policy)
+- **No cross-account enumeration by default.** `scope: 'all'`, `'directory'`
+  and an unset scope all resolve to the same visibility set: the caller's own
+  account plus entities explicitly granted to it.
+- Reasoning: a list of another account's entities discloses naming, structure,
+  headcount and activity — not being able to message them does not make the
+  directory harmless. And a scope value returning everything regardless of
+  grants would make the grant system govern delivery but not visibility: two
+  different answers to "may A see B", with only one enforced.
+- `scope: 'online'` filters the same set rather than listing every online
+  entity — otherwise it would leak exactly what `'all'` no longer does and the
+  policy would be decorative.
+- `scope: 'channel'` requires the caller to be a member. Membership is an
+  explicit relationship, so a member may see other members across accounts.
+- `/channels/list-members` requires membership for PRIVATE channels, for the
+  same reason. Public channels are joinable by anyone, so their roster is not
+  a secret.
+- A genuine global view (operator console, migration tooling) is a SEPARATE
+  capability with its own authorization. A parameter value is the wrong place
+  for a privilege boundary — nothing at a call site tells a reader that one
+  string is a different security posture than another.
+- Revisable on evidence: a concrete consumer that needs global enumeration and
+  cannot use a grant.
+- Mutation-verified: restoring `getAll()` for the default scope reddens three
+  tests.
+
 ### Per-Recipient Delivery (LOCKED)
 - **`message_deliveries` (migration v7)**: one row per (message, recipient),
   replacing the single `messages.delivered` flag shared by every recipient of a
@@ -133,10 +159,7 @@ sign-off.
   response once per process, cached) so entity-scoped commands work.
 - Before this, forging a DM as any entity and reading its history required no
   token, session or key — proven with a working exploit and now with tests.
-- **Still open:** `scope: 'all'` on `/entities/list` returns every entity on the
-  server to any authenticated caller. Now authenticated, but the policy question
-  (should any entity enumerate every other account's entities?) is unanswered
-  and belongs with directory scoping in Phase 3.
+- Cross-account enumeration resolved separately — see Directory Scoping below.
 
 ### Identity Hardening — OAuth provider binding (LOCKED)
 - **Account identity is bound to the provider that created it.** Migration v6

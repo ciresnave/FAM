@@ -5,11 +5,12 @@ import type { WebSocketManager } from '../websocket';
 import type { Route } from './index';
 import {
   NotFoundError,
+  ForbiddenError,
   UnauthorizedError,
   ChallengeExpiredError,
   SignatureInvalidError,
 } from '../../types/errors';
-import { validateEntityId, validatePagination } from '../../types/validation';
+import { validateEntityId, validateChannelId, validatePagination } from '../../types/validation';
 import {
   generateChallenge,
   storeChallenge,
@@ -309,24 +310,54 @@ export function entityRoutes(
         // Validate pagination params
         const pagination = validatePagination({ limit, offset });
 
+        const caller = ctx.entities.getById(entity_id);
+        if (!caller) {
+          throw new NotFoundError('Entity', entity_id);
+        }
+
+        // NO CROSS-ACCOUNT ENUMERATION BY DEFAULT.
+        //
+        // A list of another account's entities discloses naming, structure,
+        // headcount and activity; not being able to message them does not make
+        // the directory harmless. And a scope value that returned everything
+        // regardless of grants would make the grant system govern delivery but
+        // not visibility — two different answers to "may A see B" with only one
+        // of them enforced.
+        //
+        // So 'all', 'directory' and an unset scope all resolve to the same
+        // visibility set: the caller's own account plus entities explicitly
+        // granted to it. A genuine global view (operator console, migration
+        // tooling) belongs behind its own authorization, not behind a
+        // particular string in this parameter — nothing at a call site tells a
+        // reader that one scope value is a different security posture.
+        const directory = ctx.entities.getDirectoryForAccount(caller.account_id);
+
         let entities;
 
-        if (scope === 'directory') {
-          // Caller-relative, and the caller is now the authenticated session.
-          const caller = ctx.entities.getById(entity_id);
-          if (!caller) {
-            throw new NotFoundError('Entity', entity_id);
+        if (scope === 'channel') {
+          if (!channel_id) {
+            return new Response(
+              JSON.stringify({ error: 'channel_id is required for scope "channel"' }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
           }
 
-          entities = ctx.entities.getDirectoryForAccount(caller.account_id);
-        } else if (scope === 'channel' && channel_id) {
+          validateChannelId(channel_id);
+
+          // Membership is an explicit relationship, so a member may see the
+          // other members even across accounts — but only a member.
+          if (!ctx.channels.isMember(channel_id, entity_id)) {
+            throw new ForbiddenError('You are not a member of this channel');
+          }
+
           entities = ctx.entities.getByChannelId(channel_id);
         } else if (scope === 'online') {
-          entities = ctx.entities.getOnline();
+          // Same visibility set, filtered — otherwise 'online' would leak
+          // exactly what 'all' no longer does, and the ruling would be
+          // decorative.
+          entities = directory.filter((e) => e.status === 'online');
         } else {
-          // Default: all entities (via repo so capabilities parse and
-          // availability is included)
-          entities = ctx.entities.getAll();
+          entities = directory;
         }
         
         // Apply pagination

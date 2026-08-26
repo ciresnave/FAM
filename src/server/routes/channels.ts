@@ -259,9 +259,19 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
         if (!channel) {
           throw new NotFoundError('Channel', channel_id);
         }
-        
+
+        // A private channel's roster is as disclosive as a directory listing —
+        // naming, structure, who works with whom. Public channels are joinable
+        // by anyone, so their membership is not a secret; private ones require
+        // you to actually be in them. Closing cross-account enumeration on
+        // /entities/list while leaving it open here would give two different
+        // answers to the same question.
+        if (!channel.is_public && !ctx.channels.isMember(channel_id, entity_id)) {
+          throw new ForbiddenError('You are not a member of this channel');
+        }
+
         const members = ctx.channels.getMembers(channel_id);
-        
+
         return new Response(
           JSON.stringify({ members }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }

@@ -10,9 +10,6 @@ to each other.
 > FAM runs end to end locally, but is not ready to be deployed.
 > Known gaps, documented in full in [`ROADMAP.md`](ROADMAP.md):
 >
-> - `scope: 'all'` on `/entities/list` returns every entity on the server to any
->   authenticated caller. Whether one account may enumerate another's entities
->   is an open policy question (Phase 3).
 > - Federation, key rotation and per-recipient channel delivery are unbuilt.
 > - Not deployed anywhere, and the surface has had security passes rather than
 >   a review.

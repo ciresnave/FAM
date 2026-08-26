@@ -428,6 +428,23 @@ duplicate is a conflict now.
 - Admin API: list directory for an account (feeds Phase 4 UI).
 
 ### Phase 4 — Admin Website
+- **Access model designed — see `DESIGN-ADMIN.md`.** Scope: a website for
+  account holders to administer access to their agents.
+- Core result: **the console needs no cross-account read**, and that falls out
+  of the data model rather than being imposed on it — you grant YOUR entity to
+  THEIR account by naming an email you already know. So nothing needs to list,
+  search or autocomplete outside the account, which removes the three usual
+  enumeration leak sites before they are built.
+- Revocation verified symmetric with granting: every row in either direction
+  contains only what the viewer supplied or was deliberately given. A grant
+  between two other accounts appears in neither — tested for specifically.
+- **Blocked on two decisions, both carrying migrations**, both in DESIGN-ADMIN.md
+  with options and screens sketched:
+  1. Retention server-wide or per-account? (per-account = column on `accounts`)
+  2. May a grant or rule name a subject that does not exist? (= drop three FKs;
+     the product form is "may one account holder learn whether an email has a
+     FAM account?")
+
 - Migration v6: `admin_sessions` table (id, account_id, created_at,
   expires_at, csrf_token).
 - Cookie + CSRF auth middleware reusing existing OAuth account login.

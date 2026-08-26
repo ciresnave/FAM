@@ -1232,6 +1232,76 @@ describe('FAM Server Integration', () => {
     // question.
   });
 
+  // -- Grant listing is not a read surface -----------------------------------
+  //
+  // Granting is safe by construction: you name an email you already know. But
+  // REVOKING operates on a list, and a list is a read. The invariant that keeps
+  // revocation symmetric with granting is that neither direction can show you a
+  // grant you are not party to.
+
+  describe('grant listing shows only grants you are party to', () => {
+    const meToken = 'grantlist-me-token';
+    const meAccount = 'grantlistme@example.com';
+    const themToken = 'grantlist-them-token';
+    const themAccount = 'grantlistthem@example.com';
+    const thirdToken = 'grantlist-third-token';
+    const thirdAccount = 'grantlistthird@example.com';
+
+    beforeAll(async () => {
+      for (const [acct, tok] of [
+        [meAccount, meToken],
+        [themAccount, themToken],
+        [thirdAccount, thirdToken],
+      ] as const) {
+        await seedAccount(acct, tok);
+      }
+
+      const mine = await createEntity(meToken, 'grantlist-mine');
+      const theirs = await createEntity(themToken, 'grantlist-theirs');
+
+      // I share with them; they share with me; and two OTHER accounts share
+      // with each other — the third grant must be invisible to me entirely.
+      await seedGrant(meAccount, themAccount, mine.entity_id);
+      await seedGrant(themAccount, meAccount, theirs.entity_id);
+      const thirdEntity = await createEntity(thirdToken, 'grantlist-third');
+      await seedGrant(thirdAccount, themAccount, thirdEntity.entity_id);
+    });
+
+    test("'given' shows only grants I made", async () => {
+      const { data } = await rawApi('/admin/api/grants/list', {
+        account_token: meToken,
+        direction: 'given',
+      });
+      const others = data.grants.filter((g: any) => g.grantor_account_id !== meAccount);
+      expect(others).toEqual([]);
+      expect(data.grants.length).toBeGreaterThan(0);
+    });
+
+    test("'received' shows only grants made to me", async () => {
+      const { data } = await rawApi('/admin/api/grants/list', {
+        account_token: meToken,
+        direction: 'received',
+      });
+      const others = data.grants.filter((g: any) => g.grantee_account_id !== meAccount);
+      expect(others).toEqual([]);
+    });
+
+    // The discriminating case: a grant between two OTHER accounts.
+    test('a grant I am not party to appears in neither direction', async () => {
+      const given = await rawApi('/admin/api/grants/list', {
+        account_token: meToken,
+        direction: 'given',
+      });
+      const received = await rawApi('/admin/api/grants/list', {
+        account_token: meToken,
+        direction: 'received',
+      });
+      const all = [...given.data.grants, ...received.data.grants];
+
+      expect(all.some((g: any) => g.grantor_account_id === thirdAccount)).toBe(false);
+    });
+  });
+
   // -- WebSocket version handshake -------------------------------------------
   //
   // Inbound FRAMES were already version-checked, but only once the socket was

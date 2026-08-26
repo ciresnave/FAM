@@ -47,6 +47,34 @@ sign-off.
 - `POST /entities/availability` (session-authenticated); availability frame
   broadcast; `fam_set_availability` MCP tool; `fam entity availability` CLI.
 
+### MCP Reconnect (LOCKED)
+- **Permanent failures stop reconnecting.** `attemptReconnect` caught every
+  error identically, so a deleted entity (404) or a revoked one (401/403) was
+  retried on the same schedule as a dropped connection.
+- Correcting the original framing: this was **not** a hot loop — backoff is
+  exponential and attempts capped at 10. What it cost was ~17 minutes of
+  pointless re-authentication, an agent unusable throughout, and then a silent
+  give-up that reached only a console line.
+- `request()` now throws `FamHttpError` carrying the status, so classification
+  reads a field instead of parsing a message string.
+- **Backoff is capped at 30s.** Uncapped doubling reached 512s by attempt 10,
+  so the last retries were minutes apart — long enough that a recovered server
+  went unnoticed.
+- **Stopping is now observable.** `onTerminalFailure` notifies the consumer, and
+  the MCP server prints what happened and that messages will not arrive.
+  Previously "between retries" and "finished forever" were indistinguishable
+  from outside.
+- Classification is deliberately narrow: 5xx, 429 and network errors stay
+  transient, so a server restart is ridden out rather than evicting every
+  client.
+- **The classifier is joined to reality by integration tests**, not just unit
+  tests: `/entities/connect` is asserted to answer 404 for a revoked entity and
+  401 for a key mismatch. Unit tests assert what 404 MEANS; without these, a
+  route that started returning 500 would make the whole fix inert while every
+  test still passed.
+- Mutation-verified: making permanent failures look transient reddens the
+  classification test.
+
 ### Encryption Toggle Safety (LOCKED)
 - `FAM_ENCRYPT_MESSAGES` is a boolean over a database that may already hold rows
   written under the other setting. Both directions failed badly and neither was
@@ -282,8 +310,6 @@ sign-off.
   newer-than-server.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
-- MCP reconnect flows (server restart, undelivered delivery, fatal-error
-  handling on revoked/deleted entity — stop reconnecting on 404/401).
 - Admin edge cases: grant revocation during active DM, concurrent admin ops.
 - Migration matrix: fresh → current, each older version → current.
 - Availability + directory scoping coverage.

@@ -25,6 +25,46 @@ const FAM_WS_URL = process.env.FAM_WS_URL || DEFAULT_WS_URL;
 /** Routes that establish a session rather than consuming one. */
 const SESSION_ESTABLISHING_PATHS = new Set(['/entities/connect', '/entities/authenticate']);
 
+export class FamHttpError extends Error {
+  constructor(
+    public readonly path: string,
+    public readonly status: number,
+    body: string
+  ) {
+    super(`FAM error (${path}): ${status} ${body}`);
+    this.name = 'FamHttpError';
+  }
+}
+
+/**
+ * Is retrying pointless?
+ *
+ * 404 — the entity no longer exists. 401/403 — this key is no longer allowed to
+ * speak for it. Waiting does not fix any of those, and re-authenticating in a
+ * loop against them is work the server does for nobody.
+ *
+ * Everything else, including 5xx, 429 and network errors, is transient: the
+ * entity is presumed fine and the connection is not.
+ */
+export function isPermanentFailure(e: unknown): boolean {
+  if (!(e instanceof FamHttpError)) return false;
+  return e.status === 401 || e.status === 403 || e.status === 404;
+}
+
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+
+/**
+ * Exponential backoff, capped.
+ *
+ * Uncapped doubling reaches 512s by attempt 10, so the last retries are minutes
+ * apart — long enough that a server which came back stays unnoticed. The cap
+ * keeps late attempts useful without hammering a server that is still down.
+ */
+export function reconnectDelay(attempt: number): number {
+  return Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt), RECONNECT_MAX_DELAY_MS);
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -72,7 +112,12 @@ export class FamClient {
   private invitationHandlers: ((invitation: { channel_id: string; channel_name: string; invited_by: string; invitation_id: string }) => void)[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
-  private reconnectBaseDelay = 1000;
+  /**
+   * Set once reconnection has permanently stopped. Without this the client
+   * looked identical whether it was between retries or finished forever.
+   */
+  private terminated: { reason: string } | null = null;
+  private terminalHandlers: ((reason: string) => void)[] = [];
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   
   // Re-authentication credentials (stored for reconnection)
@@ -120,7 +165,9 @@ export class FamClient {
     
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`FAM error (${path}): ${res.status} ${err}`);
+      // Typed, so reconnect logic can tell "entity is gone" from "server is
+      // busy" instead of parsing a status out of a message string.
+      throw new FamHttpError(path, res.status, err);
     }
     
     return res.json() as Promise<T>;
@@ -481,12 +528,16 @@ export class FamClient {
   }
   
   private attemptReconnect(): void {
+    if (this.terminated) return;
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[fam-client] Max reconnection attempts reached');
+      this.terminate(
+        `gave up after ${this.maxReconnectAttempts} reconnection attempts`
+      );
       return;
     }
-    
-    const delay = this.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+
+    const delay = reconnectDelay(this.reconnectAttempts);
     this.reconnectAttempts++;
     
     console.error(`[fam-client] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
@@ -511,6 +562,20 @@ export class FamClient {
           // Connect WebSocket with new session
           this.connectWebSocket();
         } catch (e) {
+          // A deleted or revoked entity will never authenticate. Retrying it
+          // costs the server ten pointless auth attempts and leaves the agent
+          // unusable for ~17 minutes without ever saying why.
+          if (isPermanentFailure(e)) {
+            this.terminate(
+              e instanceof FamHttpError && e.status === 404
+                ? `entity ${this.entityId} no longer exists on the server`
+                : `entity ${this.entityId} is no longer authorized (${
+                    e instanceof FamHttpError ? e.status : 'auth failure'
+                  })`
+            );
+            return;
+          }
+
           console.error('[fam-client] Re-authentication failed:', e);
           this.attemptReconnect();
         }
@@ -521,6 +586,33 @@ export class FamClient {
     }, delay);
   }
   
+  /**
+   * Stop reconnecting for good and say so.
+   *
+   * Previously giving up wrote one console line and returned, so the consumer
+   * had no way to distinguish "between retries" from "finished forever" — the
+   * channel went quiet and nothing reported it.
+   */
+  private terminate(reason: string): void {
+    if (this.terminated) return;
+    this.terminated = { reason };
+    this.stopHeartbeat();
+    console.error(`[fam-client] Reconnection stopped: ${reason}`);
+    for (const handler of this.terminalHandlers) handler(reason);
+  }
+
+  /**
+   * Notified when the client stops reconnecting permanently.
+   */
+  onTerminalFailure(handler: (reason: string) => void): void {
+    this.terminalHandlers.push(handler);
+  }
+
+  /** Why reconnection stopped, or null while still connected or retrying. */
+  getTerminalReason(): string | null {
+    return this.terminated?.reason ?? null;
+  }
+
   // --------------------------------------------------------------------------
   // Getters
   // --------------------------------------------------------------------------

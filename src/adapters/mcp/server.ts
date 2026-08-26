@@ -118,7 +118,18 @@ async function main() {
     serverUrl: FAM_SERVER_URL,
     wsUrl: FAM_WS_URL,
   });
-  
+
+  // Surface a permanent disconnection instead of going quiet. Reconnection
+  // stopping used to be a single console line deep in the client, so from here
+  // a dead channel and an idle one looked identical.
+  client.onTerminalFailure((reason) => {
+    log('');
+    log(`  FAM connection has STOPPED and will not retry: ${reason}`);
+    log(`  Messages sent to ${credentials.entity_id} will not arrive.`);
+    log(`  Restart this MCP server after fixing the entity to reconnect.`);
+    log('');
+  });
+
   // 4. Authenticate with FAM server
   // First, we need to get the entity's public key from the credentials
   // The encrypted key file contains the public key

@@ -1177,6 +1177,58 @@ describe('FAM Server Integration', () => {
     });
   });
 
+  // -- Reconnect classification inputs ---------------------------------------
+  //
+  // The MCP client treats 404 and 401 from /entities/connect as PERMANENT and
+  // stops reconnecting. That is only correct while the server actually answers
+  // with those codes. If a route ever returned 500 for a deleted entity, the
+  // client would retry a hopeless case forever and the unit tests would still
+  // pass — they assert what 404 MEANS, not that 404 is what happens.
+  //
+  // These two tests are the join between the classifier and reality.
+
+  describe('the server produces the statuses reconnect depends on', () => {
+    test('connecting as a revoked entity answers 404, so the client can stop', async () => {
+      const token = 'revoked-token';
+      await seedAccount('revoked@example.com', token);
+      const created = await createEntity(token, 'to-be-revoked');
+
+      const { status: revoked } = await rawApi('/accounts/revoke-entity', {
+        account_token: token,
+        entity_id: created.entity_id,
+      });
+      expect(revoked).toBe(200);
+
+      const { status } = await rawApi('/entities/connect', {
+        entity_id: created.entity_id,
+        public_key: created.public_key,
+      });
+      expect(status).toBe(404);
+    });
+
+    test('connecting with the wrong key answers 401, so the client can stop', async () => {
+      const token = 'wrongkey-token';
+      await seedAccount('wrongkey@example.com', token);
+      const created = await createEntity(token, 'wrong-key-entity');
+
+      const { status } = await rawApi('/entities/connect', {
+        entity_id: created.entity_id,
+        public_key: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      });
+      expect(status).toBe(401);
+    });
+
+    // A server that is merely unwell must NOT look permanent, or a restart
+    // would evict every client instead of being ridden out.
+    test('an unknown entity id that is well-formed is 404, not 500', async () => {
+      const { status } = await rawApi('/entities/connect', {
+        entity_id: 'ghost@nowhere.example.com',
+        public_key: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      });
+      expect(status).toBe(404);
+    });
+  });
+
   // -- Directory scoping -----------------------------------------------------
   //
   // Ruling: no cross-account enumeration by default. A list of another

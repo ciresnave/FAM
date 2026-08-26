@@ -25,6 +25,12 @@ a route that acts on behalf of an entity, use that helper — do not read
 `entity_id` from the body. `/entities/connect` and `/entities/authenticate` are
 the only exceptions, because they establish the session.
 
+There is exactly ONE session-authentication implementation. Do not add a second
+— an inline check that happens to agree today is a second answer waiting to
+drift. `src/server/__tests__/integration.test.ts` enumerates every registered
+route and fails if any entity-scoped one answers anything but 401 to an
+unauthenticated call, so a new route cannot default into being untested.
+
 ## Repositories and remotes — READ BEFORE PUSHING
 
 Two checkouts on this machine share ancestry, and their remote naming differs.

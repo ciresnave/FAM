@@ -713,17 +713,22 @@ describe('FAM Server Integration', () => {
 
     const { entity_id } = await createEntity(token, 'av-peer');
 
-    // Missing session_id
+    // Missing session_id — now 401, not 400. This route used to validate its
+    // session inline and answered with its own status codes; it goes through
+    // requireEntitySession like every other entity route, so "no identity" has
+    // one answer across the whole surface.
     const { status: missing } = await rawApi('/entities/availability', {
       entity_id, availability: 'unavailable',
     });
-    expect(missing).toBe(400);
+    expect(missing).toBe(401);
 
-    // Bogus session
+    // Bogus session — 401 rather than 404. A session id that does not resolve
+    // is an authentication failure, not a missing resource; 404 also disclosed
+    // that the id was well-formed but unknown.
     const { status: bogus } = await rawApi('/entities/availability', {
       entity_id, session_id: 'not-a-session', availability: 'unavailable',
     });
-    expect(bogus).toBe(404);
+    expect(bogus).toBe(401);
 
     // Invalid value
     const sessionId = await seedSession(entity_id);
@@ -1124,19 +1129,12 @@ describe('FAM Server Integration', () => {
         '/admin/api/directory',
       ]);
 
-      // Validate their own session inline instead of via requireEntitySession,
-      // so they answer 400/404 rather than 401. Tracked as an inconsistency to
-      // resolve; listed explicitly so they cannot be mistaken for unprotected.
-      const LEGACY_INLINE_SESSION_CHECK = new Set([
-        '/entities/disconnect', '/entities/heartbeat', '/entities/availability',
-      ]);
-
       const unclassified: string[] = [];
       const enforced: string[] = [];
 
       for (const pattern of routes.keys()) {
         if (PUBLIC.has(pattern) || ESTABLISHING.has(pattern)) continue;
-        if (ACCOUNT_SCOPED.has(pattern) || LEGACY_INLINE_SESSION_CHECK.has(pattern)) continue;
+        if (ACCOUNT_SCOPED.has(pattern)) continue;
         if (pattern.includes(':')) { unclassified.push(pattern); continue; }
         enforced.push(pattern);
       }
@@ -1164,17 +1162,16 @@ describe('FAM Server Integration', () => {
       }
       expect(wrong).toEqual([]);
 
-      // The legacy three must still refuse a forged session outright.
-      const legacyLeaked: Array<{ route: string; status: number }> = [];
-      for (const route of LEGACY_INLINE_SESSION_CHECK) {
+      // A forged session is refused everywhere, with the same status.
+      const forged: Array<{ route: string; status: number }> = [];
+      for (const route of enforced) {
         const { status } = await rawApi(route, {
-          entity_id: victim.entity_id,
           session_id: '00000000-0000-4000-8000-000000000000',
           availability: 'unavailable',
         });
-        if (status < 400) legacyLeaked.push({ route, status });
+        if (status !== 401) forged.push({ route, status });
       }
-      expect(legacyLeaked).toEqual([]);
+      expect(forged).toEqual([]);
     });
   });
 

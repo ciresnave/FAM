@@ -47,34 +47,6 @@ export async function validateAccountToken(
   return auth.account_id;
 }
 
-/**
- * Validate an entity token (session-based).
- * Returns the entity ID if valid.
- */
-export function validateEntitySession(
-  ctx: DatabaseContext,
-  entityId: string,
-  sessionId: string
-): string {
-  if (!entityId || !sessionId) {
-    throw new UnauthorizedError('Missing entity_id or session_id');
-  }
-  
-  const session = ctx.sessions.getById(sessionId);
-  if (!session || session.entity_id !== entityId) {
-    throw new UnauthorizedError('Invalid session');
-  }
-  
-  // Check if session is still active (heartbeat within last 60 seconds)
-  const lastHeartbeat = new Date(session.last_heartbeat).getTime();
-  const now = Date.now();
-  if (now - lastHeartbeat > 60 * 1000) {
-    throw new UnauthorizedError('Session expired');
-  }
-  
-  return entityId;
-}
-
 // ============================================================================
 // Entity Session Enforcement
 // ============================================================================

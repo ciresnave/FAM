@@ -150,6 +150,24 @@ sign-off.
 - Applied to all of `/messages/*`, `/channels/*`, `/entities/status` and
   `/entities/list`. `/entities/connect` and `/entities/authenticate` are
   excluded because they establish the session.
+- **All entity-scoped routes converged on `requireEntitySession`.**
+  `/entities/disconnect`, `/entities/heartbeat` and `/entities/availability`
+  previously validated sessions inline and answered 400/404; they now answer
+  401 like everything else. A fourth implementation, `validateEntitySession`,
+  was defined and never called — deleted rather than left as a second correct
+  answer waiting to drift from the first.
+  - Behaviour change: heartbeat now enforces the 60s freshness window, so a
+    lapsed session cannot be revived by heartbeating it and the client must
+    re-authenticate. That was already the effective behaviour once
+    `cleanupStaleSessions` ran; the inline check accepted lapsed sessions in
+    the window before cleanup fired, which made the stated policy not quite
+    the policy.
+  - A bogus session id now answers 401 rather than 404 — it is an
+    authentication failure, not a missing resource, and 404 disclosed that the
+    id was well-formed but unknown.
+  - The completeness test no longer carries an exception list: every
+    entity-scoped route must answer exactly 401 to an unauthenticated call and
+    to a forged session.
 - Session id is read from the body ONLY, deliberately not from
   `Authorization: Bearer` — that header already carries the account token on
   `/accounts/*` and `/admin/api/*`, and overloading it would make two different

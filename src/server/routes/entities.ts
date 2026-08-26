@@ -145,22 +145,8 @@ export function entityRoutes(
       method: 'POST',
       pattern: '/entities/disconnect',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, session_id } = body;
-        
-        if (!entity_id || !session_id) {
-          return new Response(
-            JSON.stringify({ error: 'Missing entity_id or session_id' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-        
-        // Verify session exists
-        const session = ctx.sessions.getById(session_id);
-        if (!session || session.entity_id !== entity_id) {
-          throw new NotFoundError('Session', session_id);
-        }
-        
+        const { entityId: entity_id, sessionId: session_id } = await requireEntitySession(ctx, req);
+
         // Check for remaining sessions BEFORE deletion to avoid race condition
         const sessionCount = ctx.sessions.getCountByEntityId(entity_id);
         
@@ -185,21 +171,14 @@ export function entityRoutes(
       method: 'POST',
       pattern: '/entities/heartbeat',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, session_id } = body;
-        
-        if (!entity_id || !session_id) {
-          return new Response(
-            JSON.stringify({ error: 'Missing entity_id or session_id' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-        
-        const session = ctx.sessions.getById(session_id);
-        if (!session || session.entity_id !== entity_id) {
-          throw new NotFoundError('Session', session_id);
-        }
-        
+        // NOTE: this now enforces the 60s freshness window like every other
+        // entity route. A session that has already lapsed cannot be revived by
+        // heartbeating it — the client must re-authenticate. That was already
+        // the effective behaviour once cleanupStaleSessions ran; the inline
+        // check just happened to accept lapsed sessions in the window before
+        // cleanup fired, which made the stated 60s policy not quite the policy.
+        const { sessionId: session_id } = await requireEntitySession(ctx, req);
+
         ctx.sessions.updateHeartbeat(session_id);
         
         return new Response(
@@ -217,33 +196,21 @@ export function entityRoutes(
       method: 'POST',
       pattern: '/entities/availability',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { entity_id, session_id, availability } = body;
-        
-        if (!entity_id || !session_id || !availability) {
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { availability } = body;
+
+        if (!availability) {
           return new Response(
-            JSON.stringify({ error: 'Missing entity_id, session_id, or availability' }),
+            JSON.stringify({ error: 'Missing availability' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
-        
+
         if (!['available', 'unavailable'].includes(availability)) {
           return new Response(
             JSON.stringify({ error: 'Invalid availability. Must be: available, unavailable' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
-        }
-        
-        validateEntityId(entity_id);
-        
-        // Session must exist, belong to this entity, and be fresh
-        const session = ctx.sessions.getById(session_id);
-        if (!session || session.entity_id !== entity_id) {
-          throw new NotFoundError('Session', session_id);
-        }
-        const lastHeartbeat = new Date(session.last_heartbeat).getTime();
-        if (Date.now() - lastHeartbeat > 60 * 1000) {
-          throw new UnauthorizedError('Session expired');
         }
         
         // Flip availability: broadcast + flush queued backlog on available

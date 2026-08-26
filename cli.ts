@@ -11,8 +11,14 @@
  *   bun cli.ts kill-broker     — Stop the broker daemon
  */
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
+const DB_PATH = process.env.CLAUDE_PEERS_DB ?? join(homedir(), ".claude-peers.db");
+const SHUTDOWN_TOKEN_PATH = `${DB_PATH}.shutdown-token`;
 
 async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = body
@@ -135,8 +141,18 @@ switch (cmd) {
       console.log(`Broker has ${health.peers} peer(s). Shutting down...`);
       // Ask the broker to shut itself down. This is cross-platform, unlike the
       // previous lsof-based approach (lsof does not exist on Windows).
+      let shutdownToken: string;
       try {
-        await brokerFetch("/shutdown", {});
+        shutdownToken = readFileSync(SHUTDOWN_TOKEN_PATH, "utf-8").trim();
+      } catch {
+        console.error(
+          `Cannot read ${SHUTDOWN_TOKEN_PATH}. /shutdown is authorized by that ` +
+          `file, which the broker writes with owner-only permissions when it starts.`
+        );
+        break;
+      }
+      try {
+        await brokerFetch("/shutdown", { token: shutdownToken });
       } catch {
         // The broker exits mid-response, so the connection may drop before we
         // read the reply — that is expected and means shutdown succeeded.

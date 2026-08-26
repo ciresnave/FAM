@@ -12,6 +12,7 @@
 import { Database } from "bun:sqlite";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { writeFileSync, chmodSync } from "node:fs";
 import type {
   RegisterRequest,
   RegisterResponse,
@@ -32,6 +33,20 @@ const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const DB_PATH = process.env.CLAUDE_PEERS_DB ?? join(homedir(), ".claude-peers.db");
 
 // --- Database setup ---
+
+// --- Shutdown authorization ---
+//
+// /shutdown terminates the broker, and the broker is the coordination channel
+// for every peer on the machine. It had no authorization of any kind, so ANY
+// local process could stop it — including a web page, since a browser can POST
+// to 127.0.0.1 from any origin.
+//
+// The token is generated per broker start and written next to the database with
+// owner-only permissions. That grants nothing new: anything able to read this
+// file can already read the message database beside it. It only stops callers
+// that cannot, which is the entire drive-by case.
+const SHUTDOWN_TOKEN_PATH = `${DB_PATH}.shutdown-token`;
+const SHUTDOWN_TOKEN = crypto.randomUUID();
 
 const db = new Database(DB_PATH);
 db.run("PRAGMA journal_mode = WAL");
@@ -359,9 +374,17 @@ try {
           case "/unregister":
             handleUnregister(body as { id: string });
             return Response.json({ ok: true });
-          case "/shutdown":
+          case "/shutdown": {
+            const token = (body as { token?: string })?.token;
+            if (!token || token !== SHUTDOWN_TOKEN) {
+              return Response.json(
+                { error: "unauthorized: /shutdown requires the token from " + SHUTDOWN_TOKEN_PATH },
+                { status: 401 }
+              );
+            }
             handleShutdown();
             return Response.json({ ok: true });
+          }
           default:
             return Response.json({ error: "not found" }, { status: 404 });
         }
@@ -382,5 +405,12 @@ try {
   }
   throw e;
 }
+
+// Written only once the server is actually listening, so the file's presence
+// means a live broker rather than an attempted one.
+writeFileSync(SHUTDOWN_TOKEN_PATH, SHUTDOWN_TOKEN, { mode: 0o600 });
+// `mode` on writeFileSync only applies when the file is CREATED; an existing
+// file keeps whatever mode it had. chmod unconditionally.
+try { chmodSync(SHUTDOWN_TOKEN_PATH, 0o600); } catch {}
 
 console.error(`[claude-peers broker] listening on 127.0.0.1:${PORT} (db: ${DB_PATH})`);

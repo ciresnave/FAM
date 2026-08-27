@@ -302,9 +302,23 @@ export class MessageRepository {
    * Delete messages older than specified days.
    */
   deleteOlderThan(days: number): number {
+    // Bounded by age AND by delivery. Age alone destroys mail nobody ever
+    // collected: an uncollected message is exactly as old as one read on
+    // arrival, so the sweep dropped it silently — the sender had been told 201,
+    // the recipient never saw it, and nothing recorded the loss. Same defect
+    // already fixed in the claude-peers broker, whose sweep filters delivered.
+    //
+    // NOT EXISTS over message_deliveries, not `messages.delivered`: the latter
+    // is a single flag shared by every recipient (see migration 7), so on a
+    // channel message it says nothing about whether a PARTICULAR member has
+    // read it. One member who never collected must hold the message for all.
     const stmt = this.db.prepare(`
       DELETE FROM messages
       WHERE julianday(sent_at) < julianday('now', '-' || ? || ' days')
+        AND NOT EXISTS (
+          SELECT 1 FROM message_deliveries d
+          WHERE d.message_id = messages.id AND d.delivered = 0
+        )
     `);
 
     const result = stmt.run(days);

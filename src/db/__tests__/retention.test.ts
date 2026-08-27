@@ -83,3 +83,50 @@ describe('retention sweeps by instant, not by string shape', () => {
     expect(present('ret-iso-recent')).toBe(true);
   });
 });
+
+// ============================================================================
+// Retention must not destroy mail that was never delivered.
+//
+// The sweep bounded deletion by AGE alone. A message nobody ever collected is
+// exactly as old as one that was read the moment it arrived, so an undelivered
+// message aged out silently: the sender was told 201, the recipient never saw
+// it, and nothing recorded that it had been dropped. This is the same defect
+// already fixed in the claude-peers broker after it destroyed queued mail on
+// eviction — the broker's sweep filters `delivered = 1`; this one did not.
+//
+// Found by asking a question ABOUT the sweep, not by testing it. The retention
+// test above is scrupulous about timestamp SHAPE and passes perfectly while the
+// destruction happens, because shape was the only dimension it examined.
+//
+// The second test is the discriminator and is not optional: without it, a
+// deleteOlderThan that deletes NOTHING satisfies the first test completely.
+// ============================================================================
+
+describe('retention spares mail that was never delivered', () => {
+  async function sendAndAge(text: string, days: number): Promise<number> {
+    const m = await ctx.messages.sendDirectMessage(A, B, text);
+    ctx.db
+      .prepare(`UPDATE messages SET sent_at = datetime('now', '-' || ? || ' days') WHERE id = ?`)
+      .run(days, m.id);
+    return m.id;
+  }
+
+  test('an UNDELIVERED message survives however old it is', async () => {
+    await sendAndAge('ret-undelivered-ancient', 400);
+
+    ctx.messages.deleteOlderThan(30);
+
+    expect(present('ret-undelivered-ancient')).toBe(true);
+  });
+
+  // THE DISCRIMINATOR. Retention must still do its job, or the fix above is
+  // indistinguishable from disabling the sweep entirely.
+  test('a DELIVERED message of the same age is still swept', async () => {
+    const id = await sendAndAge('ret-delivered-ancient', 400);
+    ctx.messages.markDelivered(B, [id]);
+
+    ctx.messages.deleteOlderThan(30);
+
+    expect(present('ret-delivered-ancient')).toBe(false);
+  });
+});

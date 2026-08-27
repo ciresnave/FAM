@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAM Admin</title>
+<style>
+  /* Light is the base; dark is a token swap. Both are defined explicitly so
+     the page never borrows a background from whatever is behind it. */
+  :root {
+    --bg: #fbfbfa; --panel: #ffffff; --ink: #1a1a19; --muted: #6b6b66;
+    --line: #e3e3df; --accent: #2f5d50; --accent-ink: #ffffff;
+    --danger: #8c2f26; --chip: #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16171a; --panel: #1e2024; --ink: #e9e9e6; --muted: #9a9a94;
+      --line: #2e3138; --accent: #7fb3a2; --accent-ink: #10221c;
+      --danger: #e0857b; --chip: #262930;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  header .who { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  main { max-width: 940px; margin: 0 auto; padding: 24px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 20px; }
+  nav button {
+    background: none; border: 1px solid transparent; color: var(--muted);
+    padding: 7px 13px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 14px;
+  }
+  nav button:hover { background: var(--chip); color: var(--ink); }
+  nav button[aria-current="true"] { background: var(--chip); color: var(--ink); font-weight: 600; }
+  section[hidden] { display: none; }
+  h2 { font-size: 15px; margin: 0 0 4px; font-weight: 620; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; max-width: 62ch; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-bottom: 18px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .scroll { overflow-x: auto; }
+  th {
+    text-align: left; font-weight: 600; color: var(--muted); font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 0 12px 8px 0; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  .chip {
+    display: inline-block; background: var(--chip); border-radius: 5px;
+    padding: 1px 7px; font-size: 12px; color: var(--muted);
+  }
+  form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  input, select {
+    font: inherit; font-size: 14px; padding: 7px 9px; min-width: 190px;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--ink);
+  }
+  button.go {
+    font: inherit; font-size: 14px; padding: 8px 15px; border: none; border-radius: 7px;
+    background: var(--accent); color: var(--accent-ink); cursor: pointer; font-weight: 550;
+  }
+  button.link {
+    background: none; border: none; color: var(--danger); cursor: pointer;
+    font: inherit; font-size: 13px; padding: 0; text-decoration: underline;
+  }
+  .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+  .msg { font-size: 13px; padding: 9px 12px; border-radius: 7px; margin-bottom: 14px; }
+  .msg.err { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+  .msg.ok  { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  #signin { max-width: 460px; margin: 64px auto; }
+</style>
+</head>
+<body>
+
+<div id="signin" hidden>
+  <div class="panel">
+    <h2>Sign in to FAM Admin</h2>
+    <p class="hint">
+      Paste the account token issued by the OAuth sign-in. It is exchanged for a
+      browser session; the token itself is not stored by this page.
+    </p>
+    <div id="signin-msg"></div>
+    <form id="signin-form">
+      <label>Account token
+        <input id="token" type="password" autocomplete="off" required>
+      </label>
+      <button class="go" type="submit">Sign in</button>
+    </form>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>FAM Admin</h1>
+    <span class="who" id="whoami"></span>
+    <span class="spacer"></span>
+    <button class="link" id="signout">Sign out</button>
+  </header>
+
+  <main>
+    <nav>
+      <button data-tab="agents" aria-current="true">My agents</button>
+      <button data-tab="given">Access I've given</button>
+      <button data-tab="received">Access I've received</button>
+      <button data-tab="rules">Rules</button>
+    </nav>
+
+    <div id="msg"></div>
+
+    <section id="tab-agents">
+      <h2>My agents</h2>
+      <p class="hint">Entities in your account, plus any entity another account has shared with you.</p>
+      <div class="panel scroll"><table>
+        <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Relationship</th></tr></thead>
+        <tbody id="agents-rows"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-given" hidden>
+      <h2>Access I've given</h2>
+      <p class="hint">
+        You may share an entity with any address. If they do not have a FAM
+        account yet, the access is recorded and works as soon as they sign in —
+        nobody has to wait on anybody.
+      </p>
+      <div class="panel">
+        <form id="grant-form">
+          <label>Share which entity
+            <select id="grant-entity"></select>
+          </label>
+          <label>With
+            <input id="grant-to" type="email" placeholder="someone@example.com" required>
+          </label>
+          <button class="go" type="submit">Share</button>
+        </form>
+      </div>
+      <div class="panel scroll"><table>
+        <thead><tr><th>Entity</th><th>Shared with</th><th>Status</th><th>Since</th><th></th></tr></thead>
+        <tbody id="given-rows"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-received" hidden>
+      <h2>Access I've received</h2>
+      <p class="hint">Entities other accounts have shared with you.</p>
+      <div class="panel scroll"><table>
+        <thead><tr><th>Entity</th><th>From</th><th>Status</th><th>Since</th></tr></thead>
+        <tbody id="received-rows"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-rules" hidden>
+      <h2>Rules</h2>
+      <p class="hint">
+        Allow or deny a source from reaching your entities. A deny rule overrides
+        a grant. As with sharing, a rule may name a source that does not exist yet.
+      </p>
+      <div class="panel">
+        <form id="rule-form">
+          <label>Protect
+            <select id="rule-target"><option value="all">All my entities</option></select>
+          </label>
+          <label>From
+            <select id="rule-source-type">
+              <option value="account">An account</option>
+              <option value="entity">A single entity</option>
+            </select>
+          </label>
+          <label>Identifier
+            <input id="rule-source" placeholder="them@example.com" required>
+          </label>
+          <label>Action
+            <select id="rule-action"><option value="deny">Deny</option><option value="allow">Allow</option></select>
+          </label>
+          <button class="go" type="submit">Add rule</button>
+        </form>
+      </div>
+      <div class="panel scroll"><table>
+        <thead><tr><th>Protects</th><th>From</th><th>Action</th><th></th></tr></thead>
+        <tbody id="rules-rows"></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// The CSRF token lives in memory only, and is deliberately NOT a cookie: a
+// value the browser attaches automatically proves nothing about who sent the
+// request. The session cookie itself is HttpOnly, so nothing here can read it.
+//
+// It is re-fetched on load rather than persisted, because the cookie survives a
+// refresh and this variable does not.
+// ---------------------------------------------------------------------------
+let csrf = null;
+let entities = [];
+
+const $ = (id) => document.getElementById(id);
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrf ? { 'x-fam-csrf': csrf } : {}),
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `${res.status} ${res.statusText}`);
+  return json;
+}
+
+function note(where, text, kind) {
+  const el = $(where);
+  if (!text) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="msg ${kind || 'err'}"></div>`;
+  el.firstChild.textContent = text;
+}
+
+function td(text) {
+  const cell = document.createElement('td');
+  cell.textContent = text == null || text === '' ? '—' : String(text);
+  return cell;
+}
+
+function codeTd(text) {
+  const cell = document.createElement('td');
+  const c = document.createElement('code');
+  c.textContent = text == null ? '—' : String(text);
+  cell.appendChild(c);
+  return cell;
+}
+
+function when(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
+  return isNaN(d) ? iso : d.toLocaleDateString();
+}
+
+function fill(tbody, rows, build, emptyText) {
+  tbody.innerHTML = '';
+  if (!rows.length) {
+    const tr = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 9;
+    cell.className = 'empty';
+    cell.textContent = emptyText;
+    tr.appendChild(cell);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const row of rows) tbody.appendChild(build(row));
+}
+
+// --- screens ---------------------------------------------------------------
+
+async function loadAgents() {
+  const { entities: list } = await api('/admin/api/directory', {});
+  entities = list;
+  fill($('agents-rows'), list, (e) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(codeTd(e.id));
+    tr.appendChild(td(e.type));
+    tr.appendChild(td(e.status));
+    tr.appendChild(td(e.availability));
+    const rel = document.createElement('td');
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = e.relationship;
+    rel.appendChild(chip);
+    tr.appendChild(rel);
+    return tr;
+  }, 'No agents yet.');
+
+  const sel = $('grant-entity');
+  const owned = list.filter((e) => e.relationship === 'owned');
+  sel.innerHTML = '';
+  for (const e of owned) {
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = e.id;
+    sel.appendChild(opt);
+  }
+  const target = $('rule-target');
+  target.innerHTML = '<option value="all">All my entities</option>';
+  for (const e of owned) {
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = e.id;
+    target.appendChild(opt);
+  }
+}
+
+async function loadGiven() {
+  const { grants } = await api('/admin/api/grants/list', { direction: 'given' });
+  // NOTE: every row is rendered identically whether or not the grantee has a
+  // FAM account. A "pending" badge would be an account-existence oracle — the
+  // same one dropping the foreign keys closed, moved from create to list.
+  fill($('given-rows'), grants, (g) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(codeTd(g.entity_id));
+    tr.appendChild(codeTd(g.grantee_account_id));
+    tr.appendChild(td(g.status));
+    tr.appendChild(td(when(g.created_at)));
+    const actions = document.createElement('td');
+    if (g.status === 'active') {
+      const b = document.createElement('button');
+      b.className = 'link';
+      b.textContent = 'Revoke';
+      b.onclick = async () => {
+        try {
+          await api('/admin/api/grants/revoke', { grant_id: g.id });
+          await loadGiven();
+          note('msg', 'Access revoked.', 'ok');
+        } catch (e) { note('msg', e.message); }
+      };
+      actions.appendChild(b);
+    }
+    tr.appendChild(actions);
+    return tr;
+  }, 'You have not shared anything yet.');
+}
+
+async function loadReceived() {
+  const { grants } = await api('/admin/api/grants/list', { direction: 'received' });
+  fill($('received-rows'), grants, (g) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(codeTd(g.entity_id));
+    tr.appendChild(codeTd(g.grantor_account_id));
+    tr.appendChild(td(g.status));
+    tr.appendChild(td(when(g.created_at)));
+    return tr;
+  }, 'Nothing has been shared with you.');
+}
+
+async function loadRules() {
+  const { rules } = await api('/admin/api/permissions/list', {});
+  fill($('rules-rows'), rules, (r) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(codeTd(r.target_type === 'all' ? 'All my entities' : r.target_entity_id));
+    tr.appendChild(codeTd(r.source_entity_id || r.source_account_id));
+    tr.appendChild(td(r.action));
+    const actions = document.createElement('td');
+    const b = document.createElement('button');
+    b.className = 'link';
+    b.textContent = 'Delete';
+    b.onclick = async () => {
+      try {
+        await api('/admin/api/permissions/delete', { permission_id: r.id });
+        await loadRules();
+        note('msg', 'Rule deleted.', 'ok');
+      } catch (e) { note('msg', e.message); }
+    };
+    actions.appendChild(b);
+    tr.appendChild(actions);
+    return tr;
+  }, 'No rules. Anything you have shared is reachable; nothing else is.');
+}
+
+const LOADERS = { agents: loadAgents, given: loadGiven, received: loadReceived, rules: loadRules };
+
+async function show(tab) {
+  for (const b of document.querySelectorAll('nav button')) {
+    b.setAttribute('aria-current', String(b.dataset.tab === tab));
+  }
+  for (const key of Object.keys(LOADERS)) {
+    $(`tab-${key}`).hidden = key !== tab;
+  }
+  note('msg', '');
+  try {
+    if (tab !== 'agents' && !entities.length) await loadAgents();
+    await LOADERS[tab]();
+  } catch (e) { note('msg', e.message); }
+}
+
+// --- session ---------------------------------------------------------------
+
+async function boot() {
+  const res = await fetch('/admin/api/session/current');
+  if (!res.ok) {
+    $('signin').hidden = false;
+    $('app').hidden = true;
+    return;
+  }
+  const me = await res.json();
+  csrf = me.csrf_token;
+  $('whoami').textContent = me.account_id;
+  $('signin').hidden = true;
+  $('app').hidden = false;
+  await show('agents');
+}
+
+$('signin-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  note('signin-msg', '');
+  try {
+    const res = await fetch('/admin/api/session/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_token: $('token').value }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'Sign-in failed');
+    $('token').value = '';
+    await boot();
+  } catch (e) { note('signin-msg', e.message); }
+};
+
+$('signout').onclick = async () => {
+  try { await api('/admin/api/session/destroy', {}); } catch (e) { /* already gone */ }
+  csrf = null;
+  entities = [];
+  location.reload();
+};
+
+$('grant-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  try {
+    await api('/admin/api/grants', {
+      entity_id: $('grant-entity').value,
+      grantee_account_id: $('grant-to').value.trim(),
+    });
+    $('grant-to').value = '';
+    await loadGiven();
+    // Deliberately the same wording whether or not that address has an
+    // account. The console must not become the oracle the API stopped being.
+    note('msg', 'Access recorded. It works as soon as they sign in.', 'ok');
+  } catch (e) { note('msg', e.message); }
+};
+
+$('rule-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const sourceType = $('rule-source-type').value;
+  const target = $('rule-target').value;
+  try {
+    await api('/admin/api/permissions', {
+      target_type: target === 'all' ? 'all' : 'entity',
+      target_entity_id: target === 'all' ? null : target,
+      source_type: sourceType,
+      source_entity_id: sourceType === 'entity' ? $('rule-source').value.trim() : null,
+      source_account_id: sourceType === 'account' ? $('rule-source').value.trim() : null,
+      action: $('rule-action').value,
+    });
+    $('rule-source').value = '';
+    await loadRules();
+    note('msg', 'Rule added.', 'ok');
+  } catch (e) { note('msg', e.message); }
+};
+
+for (const b of document.querySelectorAll('nav button')) {
+  b.onclick = () => show(b.dataset.tab);
+}
+
+boot();
+</script>
+</body>
+</html>

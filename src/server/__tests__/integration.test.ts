@@ -1125,6 +1125,11 @@ describe('FAM Server Integration', () => {
       const PUBLIC = new Set([
         '/', '/health',
         '/accounts/authorize/:provider', '/accounts/callback/:provider',
+        // The console SHELL. Public deliberately: it is the sign-in screen and
+        // holds no account data — every byte of that comes from /admin/api/*,
+        // which requires a session. Gating it would gate the only place a
+        // person can sign in.
+        '/admin',
       ]);
       // Establish a session; cannot require one.
       const ESTABLISHING = new Set(['/entities/connect', '/entities/authenticate']);

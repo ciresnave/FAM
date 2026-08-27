@@ -336,3 +336,27 @@ describe('a grant may name an account that does not exist', () => {
     expect(Object.keys(stranger).sort()).toEqual(Object.keys(real).sort());
   });
 });
+
+// ---------------------------------------------------------------------------
+// The console page itself.
+// ---------------------------------------------------------------------------
+
+describe('the console shell', () => {
+  test('is served at /admin without a session', async () => {
+    const res = await fetch(`${URL_BASE}/admin`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/html');
+  });
+
+  test('carries no account data — it is a shell, not a view', async () => {
+    const html = await (await fetch(`${URL_BASE}/admin`)).text();
+    expect(html).not.toContain(ACCOUNT);
+    expect(html).not.toContain(TOKEN);
+  });
+
+  test('cannot be framed and cannot reach a third-party origin', async () => {
+    const csp = (await fetch(`${URL_BASE}/admin`)).headers.get('Content-Security-Policy') ?? '';
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("connect-src 'self'");
+  });
+});

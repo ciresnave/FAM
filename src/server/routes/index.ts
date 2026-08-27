@@ -10,6 +10,7 @@ import { messageRoutes } from './messages';
 import { healthRoutes } from './health';
 import { adminRoutes } from './admin';
 import { adminSessionRoutes } from './adminSession';
+import { adminUiRoutes } from './adminUi';
 
 // ============================================================================
 // Types
@@ -44,6 +45,7 @@ export function setupRoutes(
     ...healthRoutes(ctx),
     ...adminRoutes(ctx),
     ...adminSessionRoutes(ctx),
+    ...adminUiRoutes(),
   ];
   
   return buildRouteMap(allRoutes);

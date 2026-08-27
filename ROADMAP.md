@@ -517,9 +517,43 @@ duplicate is a conflict now.
   tables by hand, so it cannot drift from what that version actually is — the
   same instinct as deriving CI gates from the workflow instead of maintaining a
   parallel list.
-- React SPA served from the same Bun.serve at `/admin/*` (HTML imports,
-  no vite): entity CRUD, grants UI, permission matrix UI, availability
-  toggle, directory view. **Now unblocked** — both decisions are ruled.
+- **Browser sessions (DONE)**: `POST /admin/api/session/create` exchanges an
+  account token for a cookie; `GET /admin/api/session/current` re-supplies the
+  CSRF token after a refresh; `POST /admin/api/session/destroy` deletes the row
+  rather than only clearing the cookie. A token exchange rather than a second
+  OAuth redirect, which would have needed a redirect_uri at every provider and a
+  column recording which flow a pending state belongs to.
+  - `/admin/api/*` accepts either credential through ONE helper. The cookie is
+    checked first and never falls back to the bearer token: a cookie that fails
+    to authenticate must not be rescued by another credential on the same
+    request.
+  - A POST-shaped read is CSRF-checked too. The middleware sees a method, not an
+    intention, and exempting "POSTs that are really reads" is a second list that
+    fails open.
+- **PENDING INVITES ONLY HALF-WORKED UNTIL `673afa6`.** Migration v10 dropped
+  the foreign keys, but both routes kept their own `accounts.exists()` check, so
+  the database permitted a pending grant and the API went on refusing it with
+  404. **The v10 tests called the repository — one level below the claim — and
+  were green the whole time.** Verified now through the HTTP stack and in a
+  browser.
+- **Console (DONE)** at `GET /admin`: agents, access given, access received,
+  rules; grant/revoke and rule add/delete. Public route deliberately — it is the
+  sign-in screen and holds no account data.
+  - **DEVIATION from this plan, deliberate: it is one self-contained HTML file,
+    not a React SPA.** React is not a dependency of this project (there are two,
+    both runtime protocol libraries), so a React console would add a dependency
+    and a bundling step to the server's start path — including in the test
+    suite, which boots the real server. Four read screens and two forms do not
+    earn that. Revisit if the console grows client-side routing or shared state.
+  - **No pending badge, by decision.** See the correction in DESIGN-ADMIN.md:
+    marking a grant pending requires knowing whether the grantee has an account,
+    which is the account-existence oracle moved from create to list. Every row
+    renders identically; a test compares the key sets of a stranger's row and a
+    real account's.
+  - CSP is `default-src 'none'` with `frame-ancestors 'none'` and
+    `connect-src 'self'`; everything the page needs is inline.
+- **Still to build**: availability toggle, entity create/revoke from the
+  console. Both are existing API routes with no UI yet.
 
 
 ### Phase 6 — Test Backlog & Data-Model Fixes

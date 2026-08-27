@@ -72,7 +72,7 @@ let wsManager: WebSocketManager | null = null;
 /**
  * Start the FAM HTTP server.
  */
-export function startServer(config: ServerConfig): void {
+export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> {
   const ctx = getDatabaseContext();
   wsManager = new WebSocketManager(ctx);
   
@@ -177,23 +177,45 @@ export function startServer(config: ServerConfig): void {
   
   // Start periodic cleanup
   startCleanupInterval();
+
+  // Hand the caller its own handle.
+  //
+  // The module-level `server` is a convenience for the single-server case, and
+  // it silently loses the previous reference when a second server starts. Two
+  // test files each starting one is enough: the first handle is overwritten,
+  // the first afterAll finds null, and that server stays bound forever — so
+  // every run leaked a listener that blocked the NEXT run's bind. The leak only
+  // bites the following run, which is why it looked intermittent.
+  return server!;
 }
 
 /**
  * Stop the FAM server.
  */
-export function stopServer(): void {
-  if (server) {
+export function stopServer(target?: ReturnType<typeof Bun.serve>): void {
+  // Stop the handle you were given, not "whichever server started most
+  // recently". Callers that hold a handle are unaffected by anyone else
+  // starting one; callers that pass nothing keep the old single-server
+  // behaviour.
+  if (target) {
+    target.stop();
+    if (server === target) server = null;
+  } else if (server) {
     server.stop();
     server = null;
   }
-  
-  if (wsManager) {
-    wsManager.shutdown();
-    wsManager = null;
+
+  // Only tear down the shared machinery when the last server is gone.
+  // Previously one caller's shutdown closed the database another was still
+  // using, which is the same overwrite hazard one level down.
+  if (server === null) {
+    if (wsManager) {
+      wsManager.shutdown();
+      wsManager = null;
+    }
+    closeDatabase();
   }
-  
-  closeDatabase();
+
   logger.info('FAM server stopped');
 }
 

@@ -17,6 +17,7 @@ import { ADMIN_COOKIE, CSRF_HEADER } from '../middleware/adminAuth';
 // the CSRF check is not.
 // ============================================================================
 
+let serverHandle: ReturnType<typeof startServer>;
 const TEST_PORT = 17901;
 const TEST_HOST = '127.0.0.1';
 const URL_BASE = `http://${TEST_HOST}:${TEST_PORT}`;
@@ -79,11 +80,11 @@ beforeAll(async () => {
     )
     .run(`compare@${ACCOUNT}`, ACCOUNT);
 
-  startServer({ port: TEST_PORT, host: TEST_HOST });
+  serverHandle = startServer({ port: TEST_PORT, host: TEST_HOST });
   await Bun.sleep(150);
 });
 
-afterAll(() => stopServer());
+afterAll(() => stopServer(serverHandle));
 
 // ---------------------------------------------------------------------------
 // REFUSALS FIRST.

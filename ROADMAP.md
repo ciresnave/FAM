@@ -686,7 +686,68 @@ be refreshed on demand by an outside party; `last_state_change` and session
 liveness can only ever be pushed. A supervisor suspecting a stall can force a
 current answer for one of the three.
 
-### KNOWN FLAKE — encryption tests, unexplained
+### Test Harness — two defects found by chasing one flake
+
+**1. A leaked listener on the integration test port.** `startServer` stored its
+server in a module-level variable, so a second caller silently overwrote the
+first handle:
+
+```
+integration.test.ts   startServer(17899)  -> server = S1
+adminConsole.test.ts  startServer(17901)  -> server = S2   (S1's handle lost)
+adminConsole afterAll stopServer()        -> stops S2, server = null
+integration  afterAll stopServer()        -> finds null; S1 NEVER STOPPED
+```
+
+S1 then held 17899 until the process died, and **the next run failed to bind**.
+The leak bites the FOLLOWING run, which is why it looked intermittent and why a
+single run always passed. Introduced when `adminConsole.test.ts` became the
+second test file to start a server.
+
+`startServer` now returns its handle and `stopServer(handle?)` stops the one it
+is given; the shared teardown (websocket manager, database) runs only when the
+last server is gone, because one caller's shutdown was closing a database
+another was still using — the same overwrite hazard one level down.
+
+The portfolio PM reproduced this independently in an 8-run loop: clean for four
+runs, then failing on 5, 6, 7 and 8 consecutively, which is the signature of a
+leak that never releases rather than a race.
+
+**2. Three per-test timeout overrides that undid the project default.** The only
+`}, 15000)` arguments in the codebase sat on the three slowest tests —
+Argon2id at 64MB/t=3/p=4, twice each — and a per-test timeout **overrides**
+`--timeout 60000` (confirmed by probe: a 3s test with a 1000ms argument fails at
+1011ms under `--timeout 60000`). So the tests the project deliberately gave 60
+seconds were running on a 15-second budget.
+
+That produced the "unexplained crypto flake": failures at ~18s, over the local
+budget and far under the intended one. **And the failure it produced was worse
+than a slow test** — `fails decryption with wrong passkey` going red reads as a
+negative control passing, as decryption succeeding with the wrong key, when it
+actually meant the test was killed before the assertion ran. **A timeout on a
+security test is indistinguishable at a glance from that test finding something
+terrible.**
+
+Fixed by deleting overrides that should not have existed, not by raising them.
+
+### STILL OPEN — the crypto flake is explained but not reproduced
+
+The mechanism above is consistent with every observation, and the 15s budget is
+confirmed by measurement. **The event itself was never reproduced**: two
+occurrences in roughly six runs here, and zero in the PM's eight-run loop.
+
+Kept open deliberately. If it recurs, the discriminator is one string in the
+output:
+
+```
+timeout                 "^ this test timed out after ..."
+negative control passed "expected promise to reject, but it resolved"
+```
+
+The first is benign and now unlikely. The second would be serious. **Do not
+re-run it away — read the line.**
+
+### Superseded note — encryption tests, when the mechanism was unknown
 
 `Encryption > fails decryption with wrong passkey` and `> produces different
 ciphertext with different passkeys` have failed **twice in roughly six full-suite

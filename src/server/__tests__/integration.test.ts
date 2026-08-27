@@ -9,6 +9,7 @@ import { hashToken } from '../../auth/oauth';
 // Test Configuration
 // ============================================================================
 
+let serverHandle: ReturnType<typeof startServer>;
 const TEST_PORT = 17899;
 const TEST_HOST = '127.0.0.1';
 const TEST_SERVER_URL = `http://${TEST_HOST}:${TEST_PORT}`;
@@ -162,12 +163,12 @@ describe('FAM Server Integration', () => {
 
   beforeAll(async () => {
     await seedAccount(testAccountId, testToken);
-    startServer({ port: TEST_PORT, host: TEST_HOST });
+    serverHandle = startServer({ port: TEST_PORT, host: TEST_HOST });
     await Bun.sleep(500);
   });
 
   afterAll(() => {
-    stopServer();
+    stopServer(serverHandle);
     closeDatabase();
   });
 

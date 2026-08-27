@@ -445,9 +445,28 @@ duplicate is a conflict now.
      the product form is "may one account holder learn whether an email has a
      FAM account?")
 
-- Migration v6: `admin_sessions` table (id, account_id, created_at,
-  expires_at, csrf_token).
-- Cookie + CSRF auth middleware reusing existing OAuth account login.
+- **Migration v9 (DONE)**: `admin_sessions` table (id, account_id, csrf_token,
+  created_at, expires_at) + index. Was written here as "v6" — the schema had
+  moved to v8 while this plan sat unrevised, and a stale version in a plan is
+  how the next person writes a migration against a schema that no longer
+  exists.
+- **Browser-auth middleware (DONE)**: `requireAdminSession` — session cookie,
+  CSRF token on state-changing methods, Origin checked when present.
+  Decision-independent, so built while the two decisions below are outstanding.
+  - The threat is NEW to FAM: the entity API is bearer-token only, and a bearer
+    token is attached deliberately by a client. A cookie is attached
+    automatically by the browser to any request any page can cause. CSRF
+    arrives with the cookie, not with the console.
+  - Origin MISMATCH is refused; ABSENCE is not — same-origin form posts and
+    older clients omit it legitimately, and refusing those breaks the console
+    while stopping no attacker, who can simply omit the header too.
+  - Each control mutation-verified independently: dropping the CSRF check
+    reddens 3 tests, the Origin check 1, and accepting expired sessions 1.
+  - Negative controls written BEFORE the positive one. Noted for whoever reads
+    this next: the refusals alone are not evidence — while the implementation
+    was a stub that threw unconditionally, all seven passed. A deny-everything
+    middleware satisfies every negative control. The acceptance tests are what
+    make the refusals mean anything.
 - React SPA served from the same Bun.serve at `/admin/*` (HTML imports,
   no vite): entity CRUD, grants UI, permission matrix UI, availability
   toggle, directory view.

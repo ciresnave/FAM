@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -348,6 +348,24 @@ const MIGRATIONS: Record<number, string[]> = {
        account_id, target_type, COALESCE(target_entity_id, ''),
        source_type, COALESCE(source_entity_id, ''), COALESCE(source_account_id, '')
      )`,
+  ],
+  9: [
+    // Browser sessions for the admin console.
+    //
+    // Separate from `sessions`, which authenticates ENTITIES via Ed25519
+    // challenge-response. This authenticates a HUMAN account holder in a
+    // browser, and browsers send cookies automatically — which is the whole
+    // reason csrf_token exists here and not in `sessions`. The entity API is
+    // bearer-token only and has never been exposed to CSRF; adding cookies
+    // introduces that threat class to FAM for the first time.
+    `CREATE TABLE IF NOT EXISTS admin_sessions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      csrf_token TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_admin_sessions_account ON admin_sessions(account_id)`,
   ],
 };
 

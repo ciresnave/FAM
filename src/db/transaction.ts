@@ -47,6 +47,7 @@ import { EntityRepository } from './repositories/entity';
 import { ChannelRepository } from './repositories/channel';
 import { MessageRepository } from './repositories/message';
 import { SessionRepository } from './repositories/session';
+import { AdminSessionRepository } from './repositories/adminSession';
 import { InvitationRepository } from './repositories/invitation';
 import { GrantRepository } from './repositories/grant';
 import { PermissionRepository } from './repositories/permission';
@@ -58,6 +59,7 @@ export interface DatabaseContext {
   channels: ChannelRepository;
   messages: MessageRepository;
   sessions: SessionRepository;
+  adminSessions: AdminSessionRepository;
   invitations: InvitationRepository;
   grants: GrantRepository;
   permissions: PermissionRepository;
@@ -79,6 +81,7 @@ export function createContext(db: Database): DatabaseContext {
   const channels = new ChannelRepository(db);
   const messages = new MessageRepository(db);
   const sessions = new SessionRepository(db);
+  const adminSessions = new AdminSessionRepository(db);
   const invitations = new InvitationRepository(db);
   const grants = new GrantRepository(db);
   const permissions = new PermissionRepository(db);
@@ -90,6 +93,7 @@ export function createContext(db: Database): DatabaseContext {
     channels,
     messages,
     sessions,
+    adminSessions,
     invitations,
     grants,
     permissions,

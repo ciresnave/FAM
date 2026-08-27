@@ -13,45 +13,11 @@ import {
   ValidationError,
 } from '../../types/errors';
 import { validateEntityId, validateAccountId } from '../../types/validation';
-import { validateAccountToken, extractBearerToken } from '../middleware/auth';
-import { requireAdminSession } from '../middleware/adminAuth';
-import { hasAdminCookie } from './adminSession';
-import { adminAllowedOrigins } from '../../config';
+import { requireAccountAuth } from '../middleware/auth';
 
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/**
- * Parse the request body once and validate the account token (from body or
- * Authorization header). Returns the authenticated account and parsed body —
- * avoids re-reading the request body in each handler.
- */
-async function requireAccount(
-  ctx: DatabaseContext,
-  req: Request
-): Promise<{ accountId: string; body: any }> {
-  const body = await req.json().catch(() => ({})) as any;
-
-  // A browser session, when one is presented, is THE credential — and CSRF is
-  // enforced on it. Checked first and never falling back to the bearer token,
-  // because a cookie that fails to authenticate must not be rescued by another
-  // credential on the same request: that would make the weaker of the two
-  // decide the outcome.
-  //
-  // Safe in either order, as it happens — a cross-site page cannot set an
-  // Authorization header without a CORS preflight it will not survive — but
-  // "the credential the caller presented is the one we check" is the property
-  // worth having explicitly rather than by that accident.
-  if (hasAdminCookie(req)) {
-    const auth = requireAdminSession(ctx, req, adminAllowedOrigins());
-    return { accountId: auth.accountId, body };
-  }
-
-  const token = extractBearerToken(req) ?? body.account_token;
-  const accountId = await validateAccountToken(ctx, token);
-  return { accountId, body };
-}
 
 // ============================================================================
 // Admin Routes
@@ -67,7 +33,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/admin/api/grants',
       handler: async (req) => {
-        const { accountId: grantorAccountId, body } = await requireAccount(ctx, req);
+        const { accountId: grantorAccountId, body } = await requireAccountAuth(ctx, req);
         const { grantee_account_id: granteeAccountId, entity_id: entityId, capabilities, expires_at } = body;
 
         if (!granteeAccountId || !entityId) {
@@ -138,7 +104,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/admin/api/grants/list',
       handler: async (req) => {
-        const { accountId, body } = await requireAccount(ctx, req);
+        const { accountId, body } = await requireAccountAuth(ctx, req);
         const direction = body.direction ?? 'given';
 
         if (!['given', 'received'].includes(direction)) {
@@ -162,7 +128,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/admin/api/grants/revoke',
       handler: async (req) => {
-        const { accountId, body } = await requireAccount(ctx, req);
+        const { accountId, body } = await requireAccountAuth(ctx, req);
         const { grant_id: grantId } = body;
 
         if (!grantId) {
@@ -195,7 +161,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/admin/api/permissions',
       handler: async (req) => {
-        const { accountId, body } = await requireAccount(ctx, req);
+        const { accountId, body } = await requireAccountAuth(ctx, req);
         const {
           target_type, target_entity_id,
           source_type, source_entity_id, source_account_id,
@@ -300,7 +266,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/admin/api/directory',
       handler: async (req) => {
-        const { accountId } = await requireAccount(ctx, req);
+        const { accountId } = await requireAccountAuth(ctx, req);
 
         const entities = ctx.entities.getDirectoryForAccount(accountId);
 
@@ -330,7 +296,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/admin/api/permissions/list',
       handler: async (req) => {
-        const { accountId } = await requireAccount(ctx, req);
+        const { accountId } = await requireAccountAuth(ctx, req);
         const rules = ctx.permissions.listByAccount(accountId);
         return new Response(
           JSON.stringify({ rules }),
@@ -345,7 +311,7 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/admin/api/permissions/delete',
       handler: async (req) => {
-        const { accountId, body } = await requireAccount(ctx, req);
+        const { accountId, body } = await requireAccountAuth(ctx, req);
         const { permission_id: permissionId } = body;
 
         if (!permissionId) {

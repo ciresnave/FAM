@@ -552,8 +552,49 @@ duplicate is a conflict now.
     real account's.
   - CSP is `default-src 'none'` with `frame-ancestors 'none'` and
     `connect-src 'self'`; everything the page needs is inline.
-- **Still to build**: availability toggle, entity create/revoke from the
-  console. Both are existing API routes with no UI yet.
+- **Entity create/revoke from the console (DONE)**, which required making
+  `/accounts/*` accept the browser cookie. They read the token straight from the
+  body, so the console could not reach them — and copying the dual-credential
+  branch there would have been a SECOND authentication implementation, which
+  CLAUDE.md forbids for the reason it gives: an inline check that happens to
+  agree today is a second answer waiting to drift. Extracted
+  `requireAccountAuth` into `middleware/auth.ts`; admin and account routes now
+  share the one helper.
+  - `create-entity` and `revoke-entity` also answered **400 before
+    authenticating** — "no credential" and "malformed request" were the same
+    reply. Identity is now checked first.
+  - The key file is shown once, in a panel that says so. It is the entity's
+    private key encrypted under a passkey that is never stored, so there is no
+    recovery path and the copy must not imply one.
+- **`consoleMarkup.test.ts`**: the console is one file with inline script, so
+  nothing type-checks it and nothing bundles it. Its characteristic failure is a
+  NAME MISMATCH — the script asks for an id the markup lacks, `$()` returns
+  null, and the handler throws at click time on a page that renders perfectly.
+  The API tests cannot see it: every route can be correct while the button
+  wired to it is attached to nothing. Mutation-verified with a typo'd id.
+  - The oracle check there is scoped to the SCRIPT deliberately. A first version
+    read the whole file and failed on the hint text "a rule may name a source
+    that does not exist yet" — static copy about what the system PERMITS, which
+    discloses nothing about any particular address. Loosening that sentence to
+    satisfy the test would have deleted something true to guard against a thing
+    it does not do.
+
+### BLOCKED — availability toggle needs a ruling, not work
+
+The console cannot set an entity's availability, and should not until this is
+decided. `/entities/availability` requires an ENTITY session: availability is
+the entity's own DECLARED INTENT, deliberately distinct from `status`, which is
+connection-derived. CLAUDE.md says to preserve that separation.
+
+The console holds an ACCOUNT session. Adding an account-scoped override would
+let an account holder set an intent the entity did not declare — which is
+either obviously right (it is their agent, and an agent that will not go quiet
+is worse) or a quiet collapse of the distinction the model rests on.
+
+**The question for CireSnave:** may an account holder force one of their own
+entities unavailable, overriding what the entity itself declares? If yes, it is
+a new account-scoped route and one screen. If no, the console shows availability
+read-only, which is what it does today.
 
 
 ### Phase 6 — Test Backlog & Data-Model Fixes

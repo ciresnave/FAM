@@ -122,8 +122,39 @@
     <section id="tab-agents">
       <h2>My agents</h2>
       <p class="hint">Entities in your account, plus any entity another account has shared with you.</p>
+      <div class="panel">
+        <form id="entity-form">
+          <label>Name
+            <input id="entity-name" placeholder="planner" required>
+          </label>
+          <label>Type
+            <select id="entity-type">
+              <option value="agent">Agent</option>
+              <option value="human">Human</option>
+              <option value="tool">Tool</option>
+            </select>
+          </label>
+          <label>Passkey
+            <input id="entity-passkey" type="password" autocomplete="new-password" required>
+          </label>
+          <button class="go" type="submit">Create</button>
+        </form>
+      </div>
+      <div class="panel" id="keyfile-panel" hidden>
+        <h2>Save this key file now</h2>
+        <p class="hint">
+          Shown once and not recoverable. It holds the entity's private key,
+          encrypted with the passkey you just chose — the passkey is not stored
+          and cannot be reset. Without both, the entity cannot authenticate again.
+        </p>
+        <textarea id="keyfile" readonly rows="7"
+          style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;
+                 background:var(--bg);color:var(--ink);border:1px solid var(--line);
+                 border-radius:7px;padding:9px"></textarea>
+        <p><button class="link" id="keyfile-dismiss">I have saved it — dismiss</button></p>
+      </div>
       <div class="panel scroll"><table>
-        <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Relationship</th></tr></thead>
+        <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Relationship</th><th></th></tr></thead>
         <tbody id="agents-rows"></tbody>
       </table></div>
     </section>
@@ -282,6 +313,24 @@ async function loadAgents() {
     chip.textContent = e.relationship;
     rel.appendChild(chip);
     tr.appendChild(rel);
+
+    const actions = document.createElement('td');
+    // Only your own. An entity someone shared with you is theirs to revoke,
+    // and the button would fail server-side anyway — better not to offer it.
+    if (e.relationship === 'owned') {
+      const b = document.createElement('button');
+      b.className = 'link';
+      b.textContent = 'Revoke';
+      b.onclick = async () => {
+        try {
+          await api('/accounts/revoke-entity', { entity_id: e.id });
+          await loadAgents();
+          note('msg', `${e.id} revoked.`, 'ok');
+        } catch (err) { note('msg', err.message); }
+      };
+      actions.appendChild(b);
+    }
+    tr.appendChild(actions);
     return tr;
   }, 'No agents yet.');
 
@@ -458,6 +507,34 @@ $('rule-form').onsubmit = async (ev) => {
     await loadRules();
     note('msg', 'Rule added.', 'ok');
   } catch (e) { note('msg', e.message); }
+};
+
+$('entity-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  try {
+    const created = await api('/accounts/create-entity', {
+      name: $('entity-name').value.trim(),
+      type: $('entity-type').value,
+      passkey: $('entity-passkey').value,
+    });
+    // Clear the passkey immediately: it is not stored anywhere and should not
+    // sit in a form field behind the rest of the session.
+    $('entity-passkey').value = '';
+    $('entity-name').value = '';
+    $('keyfile').value = JSON.stringify(
+      { entity_id: created.entity_id, public_key: created.public_key,
+        encrypted_key_file: created.encrypted_key_file },
+      null, 2
+    );
+    $('keyfile-panel').hidden = false;
+    await loadAgents();
+    note('msg', `${created.entity_id} created.`, 'ok');
+  } catch (e) { note('msg', e.message); }
+};
+
+$('keyfile-dismiss').onclick = () => {
+  $('keyfile').value = '';
+  $('keyfile-panel').hidden = true;
 };
 
 for (const b of document.querySelectorAll('nav button')) {

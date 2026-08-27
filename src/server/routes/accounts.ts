@@ -24,7 +24,7 @@ import {
 } from '../../types/validation';
 import { generateKeyPair, bufferToBase64 } from '../../crypto/keys';
 import { encryptPrivateKey } from '../../crypto/encrypt';
-import { validateAccountToken } from '../middleware/auth';
+import { validateAccountToken, requireAccountAuth } from '../middleware/auth';
 import { DEFAULT_SERVER_URL } from '../../config';
 
 // ============================================================================
@@ -186,18 +186,18 @@ export function accountRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/accounts/create-entity',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { account_token, name, type, capabilities, passkey } = body;
-        
-        if (!account_token || !name || !type) {
+        // Identity FIRST, fields second. This route used to answer 400 for a
+        // missing account_token before authenticating anything, so "no
+        // credential" and "malformed request" were the same reply.
+        const { accountId, body } = await requireAccountAuth(ctx, req);
+        const { name, type, capabilities, passkey } = body;
+
+        if (!name || !type) {
           return new Response(
-            JSON.stringify({ error: 'Missing required fields: account_token, name, type' }),
+            JSON.stringify({ error: 'Missing required fields: name, type' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
-        
-        // Validate account token
-        const accountId = await validateAccountToken(ctx, account_token);
         
         // Validate inputs
         validateEntityType(type);
@@ -255,19 +255,8 @@ export function accountRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/accounts/list-entities',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { account_token } = body;
-        
-        if (!account_token) {
-          return new Response(
-            JSON.stringify({ error: 'Missing account_token' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-        
-        // Validate account token
-        const accountId = await validateAccountToken(ctx, account_token);
-        
+        const { accountId } = await requireAccountAuth(ctx, req);
+
         const entities = ctx.entities.getByAccountId(accountId);
         
         return new Response(
@@ -283,18 +272,15 @@ export function accountRoutes(ctx: DatabaseContext): Route[] {
       method: 'POST',
       pattern: '/accounts/revoke-entity',
       handler: async (req) => {
-        const body = await req.json() as any;
-        const { account_token, entity_id } = body;
-        
-        if (!account_token || !entity_id) {
+        const { accountId, body } = await requireAccountAuth(ctx, req);
+        const { entity_id } = body;
+
+        if (!entity_id) {
           return new Response(
-            JSON.stringify({ error: 'Missing account_token or entity_id' }),
+            JSON.stringify({ error: 'Missing entity_id' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
-        
-        // Validate account token
-        const accountId = await validateAccountToken(ctx, account_token);
         
         // Verify entity belongs to this account
         const entity = ctx.entities.getById(entity_id);

@@ -1,6 +1,8 @@
 // Authentication Middleware for FAM Server
 
 import type { DatabaseContext } from '../../db/transaction';
+import { requireAdminSession, hasAdminCookie } from './adminAuth';
+import { adminAllowedOrigins } from '../../config';
 import { UnauthorizedError } from '../../types/errors';
 import { hashToken } from '../../auth/oauth';
 
@@ -125,4 +127,45 @@ export function extractBearerToken(req: Request): string | null {
   }
   
   return parts[1] ?? null;
+}
+
+
+// ============================================================================
+// Account authentication — ONE implementation, two credentials
+// ============================================================================
+
+/**
+ * Authenticate a request acting on behalf of an ACCOUNT, by either credential:
+ * a browser session cookie or an account bearer token.
+ *
+ * There is exactly one of these on purpose. This logic first lived inline in
+ * the admin routes; /accounts/* did its own `validateAccountToken(body.token)`
+ * and so could not see the console's cookie at all. Copying the cookie branch
+ * there would have been a second answer to "who is calling?" — one that agrees
+ * today and drifts the first time either is edited.
+ *
+ * THE COOKIE IS CHECKED FIRST AND NEVER FALLS BACK. A cookie that fails to
+ * authenticate must not be rescued by another credential on the same request,
+ * or the weaker of the two decides the outcome. Safe in either order as it
+ * happens — a cross-site page cannot set an Authorization header without a
+ * preflight it will not survive — but that is an accident of CORS rather than
+ * a property worth resting on.
+ *
+ * Reads the body once and hands it back, because a Request body cannot be read
+ * twice and every caller needs it.
+ */
+export async function requireAccountAuth(
+  ctx: DatabaseContext,
+  req: Request
+): Promise<{ accountId: string; body: any }> {
+  const body = (await req.json().catch(() => ({}))) as any;
+
+  if (hasAdminCookie(req)) {
+    const auth = requireAdminSession(ctx, req, adminAllowedOrigins());
+    return { accountId: auth.accountId, body };
+  }
+
+  const token = extractBearerToken(req) ?? body?.account_token;
+  const accountId = await validateAccountToken(ctx, token);
+  return { accountId, body };
 }

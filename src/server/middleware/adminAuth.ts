@@ -112,3 +112,12 @@ export function requireAdminSession(
 
   return { accountId: session.account_id, session };
 }
+
+/**
+ * True when the request carries an admin session cookie, and so should be
+ * authenticated as a browser — with CSRF enforced — rather than by bearer
+ * token.
+ */
+export function hasAdminCookie(req: Request): boolean {
+  return parseCookies(req.headers.get('Cookie')).has(ADMIN_COOKIE);
+}

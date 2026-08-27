@@ -16,11 +16,7 @@
 import type { DatabaseContext } from '../../db/transaction';
 import type { Route } from './index';
 import { validateAccountToken, extractBearerToken } from '../middleware/auth';
-import {
-  requireAdminSession,
-  ADMIN_COOKIE,
-  parseCookies,
-} from '../middleware/adminAuth';
+import { requireAdminSession, ADMIN_COOKIE } from '../middleware/adminAuth';
 import { ADMIN_SESSION_TTL_HOURS } from '../../db/repositories/adminSession';
 import { adminAllowedOrigins } from '../../config';
 
@@ -118,12 +114,4 @@ export function adminSessionRoutes(ctx: DatabaseContext): Route[] {
       },
     },
   ];
-}
-
-/**
- * True when the request carries an admin session cookie, and so should be
- * authenticated as a browser (with CSRF enforced) rather than by bearer token.
- */
-export function hasAdminCookie(req: Request): boolean {
-  return parseCookies(req.headers.get('Cookie')).has(ADMIN_COOKIE);
 }

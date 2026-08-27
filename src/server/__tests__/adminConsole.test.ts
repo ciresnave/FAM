@@ -360,3 +360,55 @@ describe('the console shell', () => {
     expect(csp).toContain("connect-src 'self'");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Entity management from the console.
+//
+// /accounts/* read the token straight from the body, so the console's cookie
+// did not work there. The fix is NOT a second copy of the dual-credential
+// helper — CLAUDE.md forbids a second authentication implementation, and an
+// inline check that happens to agree today is a second answer waiting to
+// drift. One helper, shared.
+// ---------------------------------------------------------------------------
+
+describe('managing entities from the console', () => {
+  test('an unauthenticated create is refused', async () => {
+    const { status } = await post('/accounts/create-entity', {
+      name: 'nope', type: 'agent', passkey: 'x',
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+  });
+
+  test('the browser session can create an entity', async () => {
+    const { status, json } = await post(
+      '/accounts/create-entity',
+      { name: 'from-console', type: 'agent', passkey: 'console-passkey' },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    expect(status).toBe(201);
+    expect(json.entity_id).toBe(`from-console@${ACCOUNT}`);
+  });
+
+  test('a create with the cookie but NO csrf token is refused', async () => {
+    const { status } = await post(
+      '/accounts/create-entity',
+      { name: 'forged', type: 'agent', passkey: 'x' },
+      { Cookie: cookie }
+    );
+    expect(status).toBe(403);
+  });
+
+  test('the browser session can revoke an entity', async () => {
+    const { status } = await post(
+      '/accounts/revoke-entity',
+      { entity_id: `from-console@${ACCOUNT}` },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    expect(status).toBe(200);
+  });
+
+  test('the bearer path still works for the same routes', async () => {
+    const { status } = await post('/accounts/list-entities', { account_token: TOKEN });
+    expect(status).toBe(200);
+  });
+});

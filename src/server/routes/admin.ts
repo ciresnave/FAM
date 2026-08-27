@@ -14,6 +14,9 @@ import {
 } from '../../types/errors';
 import { validateEntityId, validateAccountId } from '../../types/validation';
 import { validateAccountToken, extractBearerToken } from '../middleware/auth';
+import { requireAdminSession } from '../middleware/adminAuth';
+import { hasAdminCookie } from './adminSession';
+import { adminAllowedOrigins } from '../../config';
 
 // ============================================================================
 // Helpers
@@ -29,6 +32,22 @@ async function requireAccount(
   req: Request
 ): Promise<{ accountId: string; body: any }> {
   const body = await req.json().catch(() => ({})) as any;
+
+  // A browser session, when one is presented, is THE credential — and CSRF is
+  // enforced on it. Checked first and never falling back to the bearer token,
+  // because a cookie that fails to authenticate must not be rescued by another
+  // credential on the same request: that would make the weaker of the two
+  // decide the outcome.
+  //
+  // Safe in either order, as it happens — a cross-site page cannot set an
+  // Authorization header without a CORS preflight it will not survive — but
+  // "the credential the caller presented is the one we check" is the property
+  // worth having explicitly rather than by that accident.
+  if (hasAdminCookie(req)) {
+    const auth = requireAdminSession(ctx, req, adminAllowedOrigins());
+    return { accountId: auth.accountId, body };
+  }
+
   const token = extractBearerToken(req) ?? body.account_token;
   const accountId = await validateAccountToken(ctx, token);
   return { accountId, body };

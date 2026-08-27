@@ -23,3 +23,21 @@ export const DEFAULT_HOST = '127.0.0.1';
 
 export const DEFAULT_SERVER_URL = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 export const DEFAULT_WS_URL = `ws://${DEFAULT_HOST}:${DEFAULT_PORT}/ws`;
+
+/**
+ * Origins the admin console may be called from.
+ *
+ * `FAM_ADMIN_ORIGINS` (comma-separated) when set, otherwise the server's own
+ * origin. Used only to REFUSE a mismatched Origin header — absence is allowed,
+ * because same-origin form posts and older clients omit it legitimately and an
+ * attacker can omit it just as easily. See `middleware/adminAuth.ts`.
+ */
+export function adminAllowedOrigins(): string[] {
+  const configured = process.env.FAM_ADMIN_ORIGINS;
+  if (configured) {
+    return configured.split(',').map(o => o.trim()).filter(Boolean);
+  }
+  const port = process.env.FAM_PORT ?? String(DEFAULT_PORT);
+  const host = process.env.FAM_HOST ?? DEFAULT_HOST;
+  return [`http://${host}:${port}`, `http://localhost:${port}`];
+}

@@ -1128,6 +1128,14 @@ describe('FAM Server Integration', () => {
       ]);
       // Establish a session; cannot require one.
       const ESTABLISHING = new Set(['/entities/connect', '/entities/authenticate']);
+      // Browser-session lifecycle for the admin console. /session/create is
+      // guarded by an account token (it is the exchange); the other two are
+      // guarded by the session cookie. None is entity-scoped.
+      const ADMIN_SESSION = new Set([
+        '/admin/api/session/create',
+        '/admin/api/session/current',
+        '/admin/api/session/destroy',
+      ]);
       // Guarded by an ACCOUNT token, not an entity session.
       const ACCOUNT_SCOPED = new Set([
         '/accounts/create-entity', '/accounts/list-entities', '/accounts/revoke-entity',
@@ -1141,7 +1149,7 @@ describe('FAM Server Integration', () => {
 
       for (const pattern of routes.keys()) {
         if (PUBLIC.has(pattern) || ESTABLISHING.has(pattern)) continue;
-        if (ACCOUNT_SCOPED.has(pattern)) continue;
+        if (ACCOUNT_SCOPED.has(pattern) || ADMIN_SESSION.has(pattern)) continue;
         if (pattern.includes(':')) { unclassified.push(pattern); continue; }
         enforced.push(pattern);
       }

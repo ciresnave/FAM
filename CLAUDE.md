@@ -58,9 +58,26 @@ there.
 
 `ciresnave/claude-peers-mcp` (the pre-rename fork) was **deleted 2026-08-20**.
 Before deletion, the broker branches `fix/preserve-undelivered-messages` (the
-code currently running) and `fix/cross-platform-support` (its rollback target)
-were archived to `ciresnave/FAM`, since neither was reachable from FAM's `main`.
-Both are verified present there. Dead remotes pointing at the deleted repo have
+code currently running), `fix/cross-platform-support` (its rollback target) and
+`fix/retention-and-indexes` were archived to `ciresnave/FAM`, since none was
+reachable from FAM's `main`. All three are verified present there.
+
+**These three branches are RETAINED ON PURPOSE and are not debris. Do not
+delete them, and do not merge them.** All three fork from `640183f` (pre-rename)
+and every one is strictly superseded — measured 2026-08-27 at `c5e1436` by
+`git diff origin/main origin/<branch> -- broker.ts server.ts cli.ts shared/`.
+The only lines they hold that `main` lacks are the *originals* of code `main`
+has since replaced, which is what being superseded looks like from a diff. In
+`fix/cross-platform-support` that includes
+`DELETE FROM messages WHERE to_id = ? AND delivered = 0` on peer eviction — the
+destroys-undelivered-mail bug itself, kept because that branch is the rollback
+target for the broker that is actually running.
+
+They exist because the repository holding them was deleted, so they have no
+other home. A sweep that subtracts merged-PR heads will surface all three every
+time: they were never PRs, and a tree diff cannot tell "main moved on" from
+"never merged". That is a true observation with a settled answer, recorded here
+so the answer does not have to be re-derived. Dead remotes pointing at the deleted repo have
 been removed from both checkouts — every configured remote now resolves.
 
 ## Architecture — FAM (`src/`)

@@ -170,13 +170,36 @@ The grant is recorded and becomes live if and when that account appears.
   in the list and a rule for expiry. Typos become invisible — you get no signal
   that `alice@exmaple.com` will never activate.
 
-**Recommendation:** Option B, with pending grants shown distinctly in "Access
-I've given" and a visible expiry. The oracle is real and the invite behaviour is
-independently better; the cost is one migration and one extra state in one list.
+**Recommendation:** Option B. Shipped as migration v10 plus removal of the
+route-level `accounts.exists()` checks — see the correction below.
 
-The mitigation for the typo problem is display, not validation: show pending
-grants separately and stamp them with age, so `alice@exmaple.com` sits visibly
-un-activated rather than silently.
+> **CORRECTION — the "show pending distinctly" half of this recommendation was
+> wrong and must not be built.**
+>
+> Marking a grant *pending* requires knowing whether the grantee has an account,
+> and surfacing that is the **same account-existence oracle** dropping the
+> foreign keys closed — moved one step, from create to list. Create a grant,
+> read the list, learn whether an address is registered.
+>
+> This document already forbade it two sections down: *"any error that
+> distinguishes 'no such account/entity' from 'not yours' — including validation
+> messages and field-level hints."* A pending badge is a field-level hint. The
+> recommendation contradicted the constraint, and the contradiction survived
+> because the two were written as separate concerns.
+>
+> **What is built instead: no distinction at all.** A grant row shows the
+> address as typed, and every row carries identical fields whether or not the
+> grantee exists. There is a test asserting exactly that — the key sets of a
+> stranger's row and a real account's row must be equal.
+>
+> The typo mitigation is that the address is **legible**, not that it is
+> validated. `alice@exmaple.com` is visible as a misspelling to the person who
+> typed it; it does not need the server to confirm nobody owns it.
+>
+> A "pending" state defined as *never exercised by the grantee* would be safe —
+> it is a fact about behaviour rather than existence, and an established account
+> that never used a grant would show it too. That needs usage tracking, which
+> does not exist. Not built.
 
 ---
 

@@ -25,6 +25,7 @@ const SECRET = process.env.FAM_SERVER_SECRET!;
 const ACCOUNT = 'console@example.com';
 const TOKEN = 'console-account-token';
 const OTHER_ACCOUNT = 'other-console@example.com';
+const COMPARE_ACCOUNT = 'compare-console@example.com';
 
 let cookie: string;
 let csrf: string;
@@ -35,12 +36,14 @@ async function post(path: string, body: unknown, headers: Record<string, string>
     headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body ?? {}),
   });
-  return { status: res.status, res, json: await res.json().catch(() => ({}) as any) };
+  const json = (await res.json().catch(() => ({}))) as any;
+  return { status: res.status, res, json };
 }
 
 async function get(path: string, headers: Record<string, string> = {}) {
   const res = await fetch(`${URL_BASE}${path}`, { headers });
-  return { status: res.status, res, json: await res.json().catch(() => ({}) as any) };
+  const json = (await res.json().catch(() => ({}))) as any;
+  return { status: res.status, res, json };
 }
 
 function cookieFrom(setCookie: string): string {
@@ -50,7 +53,7 @@ function cookieFrom(setCookie: string): string {
 
 beforeAll(async () => {
   const ctx = getDatabaseContext();
-  for (const id of [ACCOUNT, OTHER_ACCOUNT]) {
+  for (const id of [ACCOUNT, OTHER_ACCOUNT, COMPARE_ACCOUNT]) {
     ctx.db.prepare('INSERT OR IGNORE INTO accounts (id) VALUES (?)').run(id);
   }
   ctx.db
@@ -67,6 +70,14 @@ beforeAll(async () => {
        VALUES (?, ?, 'agent', 'pk', '{"can_send":true}')`
     )
     .run(`shared@${ACCOUNT}`, ACCOUNT);
+  // A second entity, so the indistinguishability comparison cannot collide
+  // with a grant an earlier test already created.
+  ctx.db
+    .prepare(
+      `INSERT OR IGNORE INTO entities (id, account_id, type, public_key, capabilities)
+       VALUES (?, ?, 'agent', 'pk', '{"can_send":true}')`
+    )
+    .run(`compare@${ACCOUNT}`, ACCOUNT);
 
   startServer({ port: TEST_PORT, host: TEST_HOST });
   await Bun.sleep(150);
@@ -243,5 +254,85 @@ describe('logout', () => {
 
     // The cookie is still in this test's hands. It must no longer work.
     expect((await get('/admin/api/session/current', { Cookie: c })).status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PENDING INVITES, AT THE API. Migration v10 dropped the three foreign keys so
+// a grant or rule MAY name a subject that does not exist — CireSnave's ruling,
+// on the grounds that "account A should be able to set up grants and rules for
+// agents that account B hasn't gotten around to creating yet."
+//
+// The v10 tests proved this against the REPOSITORY. That is one level below
+// the claim: the routes kept their own `ctx.accounts.exists()` checks, so the
+// database permitted a pending grant and the API went on refusing it with 404.
+// The product behaviour was unchanged and the tests were green.
+//
+// These assert it where a user meets it.
+// ---------------------------------------------------------------------------
+
+describe('a grant may name an account that does not exist', () => {
+  const STRANGER = 'not-a-user-yet@example.com';
+
+  test('creating it succeeds rather than 404ing', async () => {
+    const { status } = await post(
+      '/admin/api/grants',
+      { grantee_account_id: STRANGER, entity_id: `shared@${ACCOUNT}` },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    expect(status).toBe(201);
+  });
+
+  // THE ORACLE CLOSURE, asserted as a comparison. The point is not that both
+  // succeed — it is that the caller cannot tell an account that exists from one
+  // that does not, which is what makes the address unlearnable.
+  test('the response is indistinguishable from granting to a known account', async () => {
+    const known = await post(
+      '/admin/api/grants',
+      { grantee_account_id: COMPARE_ACCOUNT, entity_id: `compare@${ACCOUNT}`, capabilities: { can_send: true } },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    const unknown = await post(
+      '/admin/api/grants',
+      { grantee_account_id: 'also-nobody@example.com', entity_id: `compare@${ACCOUNT}`, capabilities: { can_send: true } },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+
+    expect(unknown.status).toBe(known.status);
+    expect(Object.keys(unknown.json.grant).sort()).toEqual(Object.keys(known.json.grant).sort());
+  });
+
+  test('a rule may name a source account that does not exist', async () => {
+    const { status } = await post(
+      '/admin/api/permissions',
+      {
+        target_type: 'all',
+        source_type: 'account',
+        source_account_id: 'blocked-before-they-exist@example.com',
+        action: 'deny',
+      },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    expect(status).toBe(201);
+  });
+
+  // The listing must not become the oracle the create path stopped being.
+  // Nothing in a grant row may report whether the grantee has an account.
+  test('listing grants does not disclose whether the grantee exists', async () => {
+    const { json } = await post(
+      '/admin/api/grants/list',
+      { direction: 'given' },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    const rows: any[] = json.grants;
+    const stranger = rows.find(g => g.grantee_account_id === STRANGER);
+    const real = rows.find(g => g.grantee_account_id === OTHER_ACCOUNT);
+
+    expect(stranger).toBeDefined();
+    expect(real).toBeDefined();
+    // Same fields, same shape. A "pending" flag here would re-open the oracle
+    // one step removed: create a grant, list it, learn whether the address has
+    // an account.
+    expect(Object.keys(stranger).sort()).toEqual(Object.keys(real).sort());
   });
 });

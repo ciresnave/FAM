@@ -95,10 +95,18 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
           throw new NotFoundError('Entity in your account', entityId);
         }
 
-        // Grantee account must exist
-        if (!ctx.accounts.exists(granteeAccountId)) {
-          throw new NotFoundError('Account', granteeAccountId);
-        }
+        // The grantee account deliberately need NOT exist.
+        //
+        // Ruled by CireSnave: "account A should be able to set up grants and
+        // rules for agents that account B hasn't gotten around to creating
+        // yet. One shouldn't be forced to wait on the other." Migration v10
+        // dropped the foreign key for it; this check was the other half, and
+        // while it stood the database permitted a pending grant and the API
+        // went on refusing one.
+        //
+        // It was also an account-existence oracle: 201 when the address had an
+        // account and 404 when it did not, testable one address at a time by
+        // anyone with an account of their own.
 
         // No duplicate grant for the same tuple
         if (ctx.grants.findAny(grantorAccountId, granteeAccountId, entityId)) {
@@ -249,10 +257,10 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
             throw new ValidationError('source_account_id required when source_type is "account"');
           }
           validateAccountId(source_account_id);
-          // Same as above: FK-enforced regardless of this check.
-          if (!ctx.accounts.exists(source_account_id)) {
-            throw new NotFoundError('Account', source_account_id);
-          }
+          // Deliberately NOT checked for existence — same ruling as grants
+          // above. You may write a rule about an account before it exists, and
+          // the comment that used to sit here ("FK-enforced regardless") went
+          // stale when migration v10 dropped that key.
         }
 
         let rule;

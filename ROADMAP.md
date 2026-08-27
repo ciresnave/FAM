@@ -614,6 +614,14 @@ cannot say whether anything is happening.
 
   Written as a test rather than a comment, because the two-field reading is the
   intuitive one and will be re-derived by whoever meets the columns next.
+- **`fam_set_queue_state` in the MCP adapter**, because a field no client can
+  set is half a feature — the whole motivation was agents reporting their own
+  state, and until this the only way to declare it was raw HTTP. The tool
+  description tells the agent to declare on BOTH edges: announcing "empty" and
+  never announcing the resumption leaves you looking idle while you work, and
+  the reverse leaves you looking busy forever after you stop. **One-edge
+  declaring is worse than none**, because it produces a confident wrong answer
+  instead of an honest null.
 - `POST /entities/queue-state` requires an ENTITY session and an explicit
   boolean. Truthy coercion would let a client send the string `"false"` and
   declare the opposite of what it means, on a field read to decide whether work

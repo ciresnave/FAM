@@ -272,6 +272,32 @@ export class FamClient {
   }
   
   /**
+   * Declare whether your work queue is empty.
+   *
+   * DECLARED state — nothing outside this process can derive it. A heartbeat
+   * proves the process is alive; it cannot say whether anything is happening,
+   * which is why this exists as a separate statement rather than being inferred.
+   *
+   * Declare it on BOTH edges. Announcing "empty" and never announcing the
+   * resumption leaves you looking idle while you work; the reverse leaves you
+   * looking busy forever after you stop.
+   */
+  async setQueueEmpty(queueEmpty: boolean): Promise<{
+    ok: boolean;
+    queue_empty: boolean;
+    last_state_change: string | null;
+  }> {
+    if (!this.entityId || !this.sessionId) {
+      throw new Error('Not authenticated');
+    }
+    return this.request('/entities/queue-state', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      queue_empty: queueEmpty,
+    });
+  }
+
+  /**
    * List entities with optional filters.
    */
   async listEntities(filters?: {

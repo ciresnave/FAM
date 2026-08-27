@@ -185,6 +185,10 @@ Available tools:
 - fam_get_history: Get message history
 - fam_set_status: Update your status (online, away, busy)
 - fam_set_availability: Pause/resume incoming messages (available/unavailable)
+- fam_set_queue_state: Declare whether you have work pending. Nothing else can
+  tell — being alive is not the same as being busy. Declare false when you take
+  work on and true when you finish; declaring only one edge is worse than not
+  declaring at all.
 
 When you start, proactively list entities and channels to understand who's available.`,
     }
@@ -376,6 +380,28 @@ When you start, proactively list entities and channels to understand who's avail
           };
         }
         
+        case 'fam_set_queue_state': {
+          const { queue_empty } = args as any;
+          // Explicit boolean only. Truthy coercion would let the string
+          // "false" declare the opposite of what it means, on a value a
+          // supervisor reads to decide whether to dispatch work.
+          if (typeof queue_empty !== 'boolean') {
+            return {
+              content: [{ type: 'text' as const, text: 'queue_empty must be true or false' }],
+              isError: true,
+            };
+          }
+          await client.setQueueEmpty(queue_empty);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: queue_empty
+                ? 'Declared: queue empty. Remember to declare false when you pick work up.'
+                : 'Declared: working. Remember to declare true when you finish.',
+            }],
+          };
+        }
+
         case 'fam_kick_member': {
           const { channel_id, target_entity } = args as any;
           if (!channel_id || !target_entity) {

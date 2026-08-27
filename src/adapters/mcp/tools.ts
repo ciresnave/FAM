@@ -158,6 +158,27 @@ export const FAM_TOOLS = [
     },
   },
   {
+    name: 'fam_set_queue_state',
+    description:
+      "Declare whether your work queue is empty. Only you know this — nothing " +
+      'outside your process can tell whether you have work pending, and a ' +
+      'heartbeat only proves you are running. Declare true when you finish your ' +
+      'last task and false when you pick work up: a supervisor uses this to ' +
+      'decide whether to send you anything. Declaring it on only one edge is ' +
+      'worse than never declaring it, because you then look permanently idle or ' +
+      'permanently busy.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        queue_empty: {
+          type: 'boolean' as const,
+          description: 'true if you have no work pending, false if you are working',
+        },
+      },
+      required: ['queue_empty'],
+    },
+  },
+  {
     name: 'fam_kick_member',
     description: 'Kick a member from a channel (requires admin/owner role). The member may rejoin.',
     inputSchema: {

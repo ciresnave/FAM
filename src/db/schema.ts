@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -157,7 +157,34 @@ const SCHEMA_SQL = `
  * Each migration runs in its own transaction; a failed migration rolls back
  * and aborts startup.
  */
-const MIGRATIONS: Record<number, string[]> = {
+/**
+ * A migration step: a SQL string, or a function for the cases SQL cannot
+ * express.
+ *
+ * SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration here is
+ * expected to survive being re-applied — 7 through 10 all use IF NOT EXISTS
+ * deliberately. A bare ALTER breaks that, and the schema rewind tests re-run
+ * later migrations against a database that already carries their objects. A
+ * step that cannot be repeated is also a step that cannot be retried after a
+ * partial failure.
+ */
+type MigrationStep = string | ((db: Database) => void);
+
+/** True when `table` already has `column`. */
+function hasColumn(db: Database, table: string, column: string): boolean {
+  const cols = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return cols.some(c => c.name === column);
+}
+
+/** Add a column only if it is absent, so the step can run twice. */
+function addColumnIfMissing(table: string, column: string, definition: string): MigrationStep {
+  return (db: Database) => {
+    if (hasColumn(db, table, column)) return;
+    db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  };
+}
+
+const MIGRATIONS: Record<number, MigrationStep[]> = {
   2: [
     // Per-row format version tracking (formats are also self-describing via
     // their version field; this column records the row-level format for
@@ -349,6 +376,28 @@ const MIGRATIONS: Record<number, string[]> = {
        source_type, COALESCE(source_entity_id, ''), COALESCE(source_account_id, '')
      )`,
   ],
+  11: [
+    // Declared state: what the entity SAYS about itself.
+    //
+    // Both columns sit beside `availability` (stated intent), not beside
+    // `status` (derived from the connection). That is the point of them, not a
+    // tidiness preference.
+    //
+    // THE MEASUREMENT. In one sweep of the claude-peers network all 17 peers
+    // reported `Last seen` inside a 9.5-second window while two agents had been
+    // idle for hours. A heartbeat says a process is breathing; it cannot say
+    // whether anything is happening. So `last_state_change` must move when an
+    // entity SAYS something changed and must NOT move because it is still alive
+    // — otherwise it is a second `last_seen` that looks healthy and answers the
+    // wrong question.
+    //
+    // queue_empty is NULLABLE deliberately. NULL means NEVER DECLARED, which is
+    // a different claim from "declared not-empty". Defaulting to 0 would make
+    // every entity that has never spoken look busy, and defaulting to 1 would
+    // make them all look idle; both invent a declaration nobody made.
+    addColumnIfMissing('entities', 'queue_empty', 'INTEGER'),
+    addColumnIfMissing('entities', 'last_state_change', 'TEXT'),
+  ],
   9: [
     // Browser sessions for the admin console.
     //
@@ -501,8 +550,12 @@ function migrate(db: Database, fromVersion: number, toVersion: number): void {
     
     db.run('BEGIN');
     try {
-      for (const sql of statements) {
-        db.run(sql);
+      for (const step of statements) {
+        if (typeof step === 'function') {
+          step(db);
+        } else {
+          db.run(step);
+        }
       }
       db.run('INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, datetime(\'now\'))', [v]);
       db.run('COMMIT');

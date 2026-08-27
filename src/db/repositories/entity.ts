@@ -168,11 +168,53 @@ export class EntityRepository {
    * Independent of connection status; persists across reconnects.
    */
   updateAvailability(id: EntityId, availability: 'available' | 'unavailable'): void {
+    // Stamps last_state_change only when the value actually differs — the
+    // column is named for a CHANGE, and re-declaring the same value is not
+    // one. If a repeat refreshed it, an agent looping on one state would look
+    // perpetually fresh, which is the failure this column exists to avoid.
     const stmt = this.db.prepare(`
-      UPDATE entities SET availability = ? WHERE id = ?
+      UPDATE entities
+      SET availability = ?,
+          last_state_change = CASE WHEN availability IS ?
+                                   THEN last_state_change
+                                   ELSE datetime('now') END
+      WHERE id = ?
     `);
 
-    stmt.run(availability, id);
+    stmt.run(availability, availability, id);
+  }
+
+  /**
+   * Declare whether this entity's work queue is empty.
+   *
+   * DECLARED state — only the entity knows, and nothing external can derive it.
+   * `null` means never declared, which is deliberately distinct from a declared
+   * false: an entity that has never spoken has made no claim, and treating that
+   * as "busy" would invent one.
+   *
+   * READ IT WITH ITS NEIGHBOURS. `queue_empty = 0` alone means working OR dead,
+   * and the two are not separable from that column:
+   *
+   *   queue_empty=0, last_state_change fresh                 -> working, changing
+   *   queue_empty=0, last_state_change old, heartbeat fresh  -> one long task
+   *   queue_empty=0, last_state_change old, heartbeat stale  -> died mid-task
+   *
+   * The last two are the pair that matters and the ONLY thing separating them
+   * is the heartbeat — so this is a triple, not a pair. A reader who consults
+   * queue_empty on its own will call a dead agent busy.
+   */
+  updateQueueEmpty(id: EntityId, queueEmpty: boolean): void {
+    const value = queueEmpty ? 1 : 0;
+    const stmt = this.db.prepare(`
+      UPDATE entities
+      SET queue_empty = ?,
+          last_state_change = CASE WHEN queue_empty IS ?
+                                   THEN last_state_change
+                                   ELSE datetime('now') END
+      WHERE id = ?
+    `);
+
+    stmt.run(value, value, id);
   }
 
   /**
@@ -263,6 +305,15 @@ export class EntityRepository {
       public_key: row.public_key,
       status: row.status || 'offline',
       availability: row.availability || 'available',
+      // NULL is preserved as null, not coerced to false. "never declared" and
+      // "declared not-empty" are different claims, and this mapper is the one
+      // place every reader passes through — `!!row.queue_empty` here would
+      // erase the distinction for all of them at once.
+      queue_empty:
+        row.queue_empty === null || row.queue_empty === undefined
+          ? null
+          : Boolean(row.queue_empty),
+      last_state_change: row.last_state_change ?? null,
       created_at: row.created_at,
       last_seen: row.last_seen,
     };

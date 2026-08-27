@@ -279,6 +279,12 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
           display_name: entity.display_name,
           status: entity.status,
           availability: entity.availability,
+          // Declared state. Both are reported as stored, including null for
+          // queue_empty, which means NEVER DECLARED — a different claim from a
+          // declared false, and flattening it here would invent a declaration
+          // the entity never made.
+          queue_empty: entity.queue_empty ?? null,
+          last_state_change: entity.last_state_change ?? null,
           created_at: entity.created_at,
           relationship: entity.account_id === accountId ? 'owned' : 'granted',
         }));

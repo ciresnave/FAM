@@ -223,6 +223,44 @@ export function entityRoutes(
       },
     },
     
+    // POST /entities/queue-state
+    // Declare whether this entity's work queue is empty.
+    //
+    // Entity session required, for the same reason as availability: this is a
+    // DECLARATION about the entity's own state, and only the entity knows it.
+    // Nothing external can derive whether an agent has work queued — which is
+    // precisely why the field is worth having and why no one else may set it.
+    {
+      method: 'POST',
+      pattern: '/entities/queue-state',
+      handler: async (req) => {
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { queue_empty } = body;
+
+        // Explicit boolean only. Accepting truthy values would let a client
+        // send "false" (a non-empty string) and declare the opposite of what it
+        // means, and this field is read to decide whether work gets dispatched.
+        if (typeof queue_empty !== 'boolean') {
+          return new Response(
+            JSON.stringify({ error: 'queue_empty must be a boolean (true or false)' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        ctx.entities.updateQueueEmpty(entity_id, queue_empty);
+        const entity = ctx.entities.getById(entity_id)!;
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            queue_empty,
+            last_state_change: entity.last_state_change,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
     // POST /entities/status
     // Update entity status
     {

@@ -121,7 +121,15 @@
 
     <section id="tab-agents">
       <h2>My agents</h2>
-      <p class="hint">Entities in your account, plus any entity another account has shared with you.</p>
+      <p class="hint">
+        Entities in your account, plus any entity another account has shared with
+        you. <strong>Status</strong> is derived from the connection;
+        <strong>availability</strong> and <strong>queue</strong> are what the
+        entity itself declares, and <strong>last declared</strong> is when it
+        last said something changed — not when it was last seen. An agent with a
+        non-empty queue and an old declaration is either working one long task or
+        stopped mid-task; only its connection tells you which.
+      </p>
       <div class="panel">
         <form id="entity-form">
           <label>Name
@@ -154,7 +162,7 @@
         <p><button class="link" id="keyfile-dismiss">I have saved it — dismiss</button></p>
       </div>
       <div class="panel scroll"><table>
-        <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Relationship</th><th></th></tr></thead>
+        <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Queue</th><th>Last declared</th><th>Relationship</th><th></th></tr></thead>
         <tbody id="agents-rows"></tbody>
       </table></div>
     </section>
@@ -307,6 +315,15 @@ async function loadAgents() {
     tr.appendChild(td(e.type));
     tr.appendChild(td(e.status));
     tr.appendChild(td(e.availability));
+    // null is rendered as "not declared", never as busy. The entity has made no
+    // claim, and showing one it did not make is how a supervisor ends up
+    // dispatching work to something mid-task.
+    tr.appendChild(td(
+      e.queue_empty === null || e.queue_empty === undefined
+        ? 'not declared'
+        : (e.queue_empty ? 'empty' : 'has work')
+    ));
+    tr.appendChild(td(e.last_state_change ? when(e.last_state_change) : 'never'));
     const rel = document.createElement('td');
     const chip = document.createElement('span');
     chip.className = 'chip';

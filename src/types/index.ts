@@ -41,6 +41,35 @@ export interface Entity {
    * back to 'available', at which point the backlog is pushed immediately).
    */
   availability: Availability;
+
+  /**
+   * Whether the entity has DECLARED its work queue empty.
+   *
+   * `null` means never declared, and that is a distinct claim from `false`: an
+   * entity that has not spoken has made no statement, and reading that as
+   * "busy" invents one. Only the entity can set this — nothing external can
+   * derive whether it has work queued, which is the whole reason it exists.
+   *
+   * NEVER READ IT ALONE. `false` means working OR died mid-task; the reading
+   * is a triple with `last_state_change` and session liveness. See
+   * EntityRepository.updateQueueEmpty.
+   */
+  queue_empty: boolean | null;
+
+  /**
+   * When this entity last DECLARED a change to `availability` or
+   * `queue_empty`. Null until it declares something.
+   *
+   * Deliberately NOT a liveness signal, and deliberately not `last_seen`. A
+   * heartbeat says a process is breathing; it cannot say whether anything is
+   * happening — in one sweep of the peer network all 17 agents heartbeated
+   * within 9.5 seconds of each other while two had been idle for hours.
+   *
+   * It records a CHANGE: re-declaring the same value does not move it, or an
+   * agent looping on one state would look perpetually fresh.
+   */
+  last_state_change: string | null;
+
   created_at: string;
   last_seen: string | null;
 }

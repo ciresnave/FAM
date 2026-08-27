@@ -14,7 +14,8 @@
     "broker": "bun broker.ts",
     "server": "bun server.ts",
     "test": "bun test --timeout 60000",
-    "typecheck": "bun run tsc --noEmit"
+    "typecheck": "bun run tsc --noEmit",
+    "gates": "bun run src/scripts/gates.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

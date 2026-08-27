@@ -165,6 +165,23 @@ Default to using Bun instead of Node.js.
 
 ## Testing
 
+**Before you push, run `bun run gates`.** It reads
+`.github/workflows/test.yml`, extracts the commands CI runs, and runs those —
+so it has no list of its own to drift. Adding a step to CI adds it locally with
+no second edit.
+
+This exists because of a specific failure. Commit `d0819a9` was pushed with a
+green test suite and a broken typecheck, and CI caught it in twelve seconds. The
+suite had been run; `tsc` had not. **Local verification was a strict subset of
+the gate, and the gap was invisible because everything that was run passed.**
+That is the second instance of one shape here — the first is `bun test` below —
+and in both a hand-invoked command answered a narrower question than CI's while
+looking like success.
+
+`bun run gates` refuses rather than guesses: a step it cannot parse aborts the
+run, because a local gate that silently skips what it cannot read is worse than
+none.
+
 Run tests with `bun run test`, **not** `bun test`.
 
 Bun does not honour the `[test] timeout` key in `bunfig.toml`, so three

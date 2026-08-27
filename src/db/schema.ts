@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -366,6 +366,98 @@ const MIGRATIONS: Record<number, string[]> = {
       expires_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_admin_sessions_account ON admin_sessions(account_id)`,
+  ],
+  10: [
+    // A grant or rule MAY name a subject that does not exist yet.
+    //
+    // Ruled by CireSnave, for two independent reasons:
+    //
+    //  1. Creating a grant answered 201 when the grantee account existed and
+    //     404 when it did not — an account-existence oracle. Anyone with an
+    //     account could test any email address, one at a time, and get a
+    //     definitive answer.
+    //
+    //  2. His reason, and the stronger one: "account A should be able to set up
+    //     grants and rules for agents that account B hasn't gotten around to
+    //     creating yet. One shouldn't be forced to wait on the other."
+    //
+    // Nothing at the route enforced this — three FOREIGN KEYS did, which is why
+    // closing it needs a migration rather than an edit. SQLite cannot drop a
+    // constraint in place, so both tables are rebuilt.
+    //
+    // DROPPED: grants.grantee_account_id, permissions.source_entity_id,
+    // permissions.source_account_id — every one of them names SOMEONE ELSE.
+    // KEPT: grantor_account_id, entity_id, permissions.account_id,
+    // target_entity_id, created_by_entity — every one names something the actor
+    // OWNS, which must still cascade on delete.
+    //
+    // CONSEQUENCE, accepted: account ids are email addresses, so an account
+    // deleted and later recreated under the same address inherits any grant
+    // still naming it. Inherent to naming subjects by email, which is what
+    // pending invites require; recorded so it is a known property rather than a
+    // later discovery.
+
+    // ---- grants: drop the grantee FK, keep the rest ----
+    `CREATE TABLE IF NOT EXISTS grants_v10 (
+      id TEXT PRIMARY KEY,
+      grantor_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      grantee_account_id TEXT NOT NULL,
+      entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      capabilities TEXT DEFAULT '{}',
+      status TEXT DEFAULT 'active' CHECK(status IN ('active', 'revoked')),
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT,
+      revoked_at TEXT,
+      UNIQUE(grantor_account_id, grantee_account_id, entity_id)
+    )`,
+    `INSERT OR IGNORE INTO grants_v10 (id, grantor_account_id, grantee_account_id, entity_id,
+                                      capabilities, status, created_at, expires_at, revoked_at)
+     SELECT id, grantor_account_id, grantee_account_id, entity_id,
+            capabilities, status, created_at, expires_at, revoked_at FROM grants`,
+    'DROP TABLE grants',
+    'ALTER TABLE grants_v10 RENAME TO grants',
+    'CREATE INDEX IF NOT EXISTS idx_grants_grantor ON grants(grantor_account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_grants_grantee ON grants(grantee_account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_grants_entity ON grants(entity_id, status)',
+
+    // ---- permissions: drop both SOURCE FKs, keep every CHECK and the v8 index ----
+    `CREATE TABLE IF NOT EXISTS permissions_v10 (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      target_type TEXT NOT NULL CHECK(target_type IN ('entity', 'all')),
+      target_entity_id TEXT REFERENCES entities(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL CHECK(source_type IN ('entity', 'account')),
+      source_entity_id TEXT,
+      source_account_id TEXT,
+      action TEXT NOT NULL CHECK(action IN ('allow', 'deny')),
+      created_at TEXT DEFAULT (datetime('now')),
+      created_by_entity TEXT REFERENCES entities(id) ON DELETE SET NULL,
+      CHECK (target_type != 'entity' OR target_entity_id IS NOT NULL),
+      CHECK (target_type != 'all' OR target_entity_id IS NULL),
+      CHECK (source_type != 'entity' OR source_entity_id IS NOT NULL),
+      CHECK (source_type != 'entity' OR source_account_id IS NULL),
+      CHECK (source_type != 'account' OR source_account_id IS NOT NULL),
+      CHECK (source_type != 'account' OR source_entity_id IS NULL)
+    )`,
+    `INSERT OR IGNORE INTO permissions_v10 (id, account_id, target_type, target_entity_id,
+                                           source_type, source_entity_id, source_account_id,
+                                           action, created_at, created_by_entity)
+     SELECT id, account_id, target_type, target_entity_id,
+            source_type, source_entity_id, source_account_id,
+            action, created_at, created_by_entity FROM permissions`,
+    'DROP TABLE permissions',
+    'ALTER TABLE permissions_v10 RENAME TO permissions',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_account ON permissions(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_target ON permissions(target_type, target_entity_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_source ON permissions(source_type, source_entity_id, source_account_id)',
+    // Recreated because it died with the dropped table. Same COALESCE form as
+    // migration 8: three columns are nullable and SQLite treats NULL as
+    // distinct from NULL in a UNIQUE index, so the bare form permits exactly
+    // the duplicates it exists to prevent.
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_permissions_tuple ON permissions(
+       account_id, target_type, COALESCE(target_entity_id, ''),
+       source_type, COALESCE(source_entity_id, ''), COALESCE(source_account_id, '')
+     )`,
   ],
 };
 

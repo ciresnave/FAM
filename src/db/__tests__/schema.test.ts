@@ -3,14 +3,14 @@ import { Database } from 'bun:sqlite';
 import { initializeDatabase } from '../schema';
 
 describe('Schema Migrations', () => {
-  test('fresh database initializes at current schema version with v2-v9 objects', () => {
+  test('fresh database initializes at current schema version with v2-v10 objects', () => {
     const db = new Database(':memory:');
     initializeDatabase(db);
 
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(9);
+    expect(version.version).toBe(10);
 
     // v2 columns exist on all three tables
     for (const table of ['entities', 'channels', 'messages']) {
@@ -107,7 +107,7 @@ describe('Schema Migrations', () => {
     const version = db1
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(9);
+    expect(version.version).toBe(10);
 
     // v2 columns now exist and pre-existing data survived
     const cols = db1
@@ -211,7 +211,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(9);
+    expect(version.version).toBe(10);
 
     // The ambiguous row survived, normalized: target_entity_id and
     // source_entity_id stripped per the rule shape
@@ -240,6 +240,28 @@ describe('Schema Migrations', () => {
       -- Omitting them made this a database that could never have existed, and
       -- migration 8 (which indexes permissions) exposed that rather than any
       -- defect in the migration itself.
+      --
+      -- IT HAPPENED AGAIN. That fix added only the permissions table -- the
+      -- one migration 8 reached for -- leaving the fixture still unable to
+      -- represent a v5 database, and migration 10 (which rebuilds grants)
+      -- walked into the same hole two migrations later: fixing the instance
+      -- left the class.
+      --
+      -- The general fix is to BUILD this fixture by running migrations 1..5
+      -- rather than hand-writing tables, so it cannot drift from what a v5
+      -- database actually is. Recorded in ROADMAP; not folded in here, because
+      -- it is a rewrite of every fixture in this file rather than a line.
+      CREATE TABLE IF NOT EXISTS grants (
+        id TEXT PRIMARY KEY,
+        grantor_account_id TEXT NOT NULL,
+        grantee_account_id TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        capabilities TEXT DEFAULT '{}',
+        status TEXT DEFAULT 'active',
+        created_at TEXT DEFAULT (datetime('now')),
+        expires_at TEXT,
+        revoked_at TEXT
+      );
       CREATE TABLE IF NOT EXISTS permissions (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -261,7 +283,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(9);
+    expect(version.version).toBe(10);
 
     const cols = db.query('PRAGMA table_info(accounts)').all() as { name: string }[];
     const names = cols.map((c) => c.name);
@@ -335,7 +357,7 @@ describe('Schema Migrations', () => {
     initializeDatabase(db);
 
     const version = db.query('SELECT MAX(version) as version FROM schema_version').get() as { version: number };
-    expect(version.version).toBe(9);
+    expect(version.version).toBe(10);
 
     // DM: exactly one recipient, and the old flag is preserved.
     const dm = db

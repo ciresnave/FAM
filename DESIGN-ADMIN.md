@@ -1,8 +1,8 @@
 # FAM Admin Console — Access Model
 
-**Status:** design, not built. Two decisions below need answering before build,
-because both carry migrations and the console would otherwise encode an answer
-by accident.
+**Status:** browser-auth layer built (migration v9). **Both decisions below are
+RULED** — see each section. Migration v10 has landed for decision 2; decision 1
+turned out not to need a migration at all. The console screens are unblocked.
 
 **Scope (from CireSnave):** a website for account holders to administer access
 to their agents.
@@ -59,7 +59,26 @@ surface.
 
 ---
 
-## Decision 1 — Is retention server-wide or per-account?
+## Decision 1 — Is retention server-wide or per-account? — **DISSOLVED**
+
+> **Ruled 2026-08-19.** Neither. CireSnave asked whether retention should exist
+> at all: *"What if we notify the sender that the destination is unreachable and
+> let them figure it out?"* If nothing is deleted by default there is nothing to
+> configure per account, so the column on `accounts` is never needed. **A
+> question answered "no" at the product level deleted schema work that both
+> candidate answers would have required.**
+>
+> Shape proposed back to him, not yet ruled: retention OFF by default for
+> DELIVERED messages; UNDELIVERED past a threshold notifies the sender and then
+> discards; permanently-unreachable (entity deleted) notifies immediately.
+> Delivered messages are the gap in the idea as stated — they generate no
+> unreachability event, so nothing would ever trigger and they accumulate.
+>
+> Chasing this question found a live bug: the sweep was deleting UNDELIVERED
+> mail, on by default at 30 days. Fixed separately — it is wrong under any
+> retention policy.
+
+### Original framing, kept for the record
 
 The retention **number** needs no decision: `deleteOlderThan(days)` is one
 statement bounded by a date, so 30 / 90 / 365 is an environment variable,
@@ -70,14 +89,34 @@ changeable any time, no migration.
 console never shows retention at all. If it is "per-account", it belongs beside
 the account settings and needs the migration before build.
 
-**Recommendation:** server-wide for now. Nothing about the current product
-suggests one account holder needs a different message lifetime from another, and
-the column can be added later without invalidating anything — the migration is
-additive.
+**Recommendation (superseded by the ruling above):** server-wide for now.
+Nothing about the current product suggests one account holder needs a different
+message lifetime from another.
+
+Worth noting what this recommendation missed: it answered the question as posed
+and never asked whether the feature should exist. Both options carried a cost
+neither needed to carry.
 
 ---
 
-## Decision 2 — May a grant or rule name a subject that does not exist?
+## Decision 2 — May a grant or rule name a subject that does not exist? — **RULED: YES**
+
+> **Ruled 2026-08-19.** Option B, and for a reason this document did not have.
+> It argued from the enumeration oracle. He argued from workflow:
+>
+> > *"account A should be able to set up grants and rules for agents that account
+> > B hasn't gotten around to creating yet. One shouldn't be forced to wait on
+> > the other."*
+>
+> Same decision, different product. The oracle argument makes pending grants a
+> security concession to be apologised for; the workflow argument makes them an
+> INVITE, which is a feature. **The justification shapes the artifact even when
+> the ruling is identical** — so the pending state gets designed as "access
+> recorded, waiting for them", not as a degraded mode.
+>
+> Shipped as migration v10.
+
+### Original framing, kept for the record
 
 This is the one place the no-cross-account-read constraint is currently
 violated, and it is a **product** question, not a schema detail:

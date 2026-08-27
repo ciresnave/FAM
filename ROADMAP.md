@@ -438,12 +438,25 @@ duplicate is a conflict now.
 - Revocation verified symmetric with granting: every row in either direction
   contains only what the viewer supplied or was deliberately given. A grant
   between two other accounts appears in neither — tested for specifically.
-- **Blocked on two decisions, both carrying migrations**, both in DESIGN-ADMIN.md
-  with options and screens sketched:
-  1. Retention server-wide or per-account? (per-account = column on `accounts`)
-  2. May a grant or rule name a subject that does not exist? (= drop three FKs;
-     the product form is "may one account holder learn whether an email has a
-     FAM account?")
+- **Both blocking decisions RULED by CireSnave (2026-08-19). Neither produced
+  the migration that was expected.**
+  1. *Retention server-wide or per-account?* — **dissolved rather than answered.**
+     He asked whether retention should exist at all: notify the sender that the
+     destination is unreachable and let them resolve it, instead of ageing
+     messages out silently. Per-account retention needs a column on `accounts`
+     ONLY if something is deleted by default; if nothing is, there is nothing to
+     configure. **A question answered "no" at the product level deleted schema
+     work that both candidate answers would have required.** Worth reaching for
+     whenever a queue is shaped like "which of these two" — sometimes the third
+     option is that neither is needed. Final shape still open, see Retention below.
+  2. *May a grant or rule name a subject that does not exist?* — **YES**, and his
+     reason is stronger than the one this document argued. The design argued from
+     the enumeration oracle. He argued from workflow: *"account A should be able
+     to set up grants and rules for agents that account B hasn't gotten around to
+     creating yet. One shouldn't be forced to wait on the other."* Same ruling,
+     different artifact — the oracle argument produces an apologetic "pending"
+     badge, the workflow argument produces an INVITE. **The justification shapes
+     what gets built even when the decision is identical.**
 
 - **Migration v9 (DONE)**: `admin_sessions` table (id, account_id, csrf_token,
   created_at, expires_at) + index. Was written here as "v6" — the schema had
@@ -474,9 +487,39 @@ duplicate is a conflict now.
     was a stub that threw unconditionally, all seven passed. A deny-everything
     middleware satisfies every negative control. The acceptance tests are what
     make the refusals mean anything.
+- **Migration v10 (DONE)**: dropped `grants.grantee_account_id`,
+  `permissions.source_entity_id`, `permissions.source_account_id`. Every dropped
+  key names SOMEONE ELSE; every kept key names something the actor owns.
+  Enforcement was never at the route — three foreign keys held it, which is why
+  a product decision needed a migration.
+  - Accepted consequence, recorded so it is a known property rather than a later
+    discovery: account ids are email addresses, so an account deleted and later
+    recreated under the same address inherits any grant still naming it.
+    Inherent to naming subjects by email, which is what pending invites require.
+  - **The guard for this was vacuous when first written, and the failure is worth
+    keeping.** The obvious check — "deleting the grantor's account still removes
+    their grants" — PASSES with the grantor FK removed, verified by mutation.
+    Deleting an account cascades to its entities, and `grants.entity_id ->
+    entities` removes the grant by a second independent path. The test asserted
+    an outcome TWO constraints can produce, so it isolated neither, and dropping
+    every foreign key on the table would have passed it. Replaced with a
+    structural assertion over `PRAGMA foreign_key_list`. **When a change is
+    defined as "drop exactly these constraints", the check has to read the
+    constraints; anything behavioural is satisfiable by whatever else happens to
+    be holding.** Both directions now mutation-verified: over-drop reddens only
+    the structural guard, under-drop reddens it plus three behavioural tests.
+- **KNOWN, not fixed — the migration fixtures in `schema.test.ts` are
+  hand-written and cannot represent a real database.** The v5 fixture stamps
+  version 5 while omitting tables migration 3 creates. Migration 8 hit this and
+  the fix added only the one table it needed; migration 10 walked into the same
+  hole two migrations later. **Fixing the instance left the class.** The general
+  fix is to BUILD each fixture by running migrations 1..N rather than listing
+  tables by hand, so it cannot drift from what that version actually is — the
+  same instinct as deriving CI gates from the workflow instead of maintaining a
+  parallel list.
 - React SPA served from the same Bun.serve at `/admin/*` (HTML imports,
   no vite): entity CRUD, grants UI, permission matrix UI, availability
-  toggle, directory view.
+  toggle, directory view. **Now unblocked** — both decisions are ruled.
 
 
 ### Phase 6 — Test Backlog & Data-Model Fixes

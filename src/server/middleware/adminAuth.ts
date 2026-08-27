@@ -10,6 +10,7 @@
 import type { DatabaseContext } from '../../db/transaction';
 import type { AdminSession } from '../../db/repositories/adminSession';
 import { UnauthorizedError, ForbiddenError } from '../../types/errors';
+import { logger } from '../../utils/logger';
 
 /** Name of the session cookie. */
 export const ADMIN_COOKIE = 'fam_admin_session';
@@ -83,7 +84,23 @@ export function requireAdminSession(
     throw new ForbiddenError(`Origin ${origin} is not allowed`);
   }
 
-  if (!SAFE_METHODS.has(req.method.toUpperCase())) {
+  const unsafe = !SAFE_METHODS.has(req.method.toUpperCase());
+
+  // Absence is allowed (see above) but NOT ignored. Modern browsers send Origin
+  // on all POSTs including same-origin, so absence increasingly means "not a
+  // browser" — an older client, a direct API call, or a script. That is not
+  // refusable, for the reason above, but a rise in Origin-absent authenticated
+  // writes is a signal about who is calling the console, and it is better to
+  // have it before it is wanted urgently.
+  if (unsafe && origin === null) {
+    logger.info('Admin write with no Origin header', {
+      accountId: session.account_id,
+      method: req.method,
+      path: new URL(req.url).pathname,
+    });
+  }
+
+  if (unsafe) {
     const presented = req.headers.get(CSRF_HEADER);
     if (!presented || presented !== session.csrf_token) {
       throw new ForbiddenError(

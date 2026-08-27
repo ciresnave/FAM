@@ -459,7 +459,14 @@ duplicate is a conflict now.
     arrives with the cookie, not with the console.
   - Origin MISMATCH is refused; ABSENCE is not — same-origin form posts and
     older clients omit it legitimately, and refusing those breaks the console
-    while stopping no attacker, who can simply omit the header too.
+    while stopping no attacker, who can simply omit the header too. A control
+    an adversary disables by doing LESS is not a control; Origin is defence in
+    depth over the CSRF token, never a substitute.
+  - Absence is allowed but LOGGED. Modern browsers send Origin on all POSTs
+    including same-origin, so absence increasingly means "not a browser". Not
+    refusable, but a rise in Origin-absent authenticated writes says something
+    about who is calling the console, and it is better to have that signal
+    before it is wanted urgently.
   - Each control mutation-verified independently: dropping the CSRF check
     reddens 3 tests, the Origin check 1, and accepting expired sessions 1.
   - Negative controls written BEFORE the positive one. Noted for whoever reads

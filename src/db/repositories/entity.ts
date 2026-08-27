@@ -1,6 +1,7 @@
 // Entity Repository - CRUD Operations for Entities
 
 import { Database } from 'bun:sqlite';
+import { QueueNotEmptyError } from '../../types/errors';
 import type { Entity, EntityId, AccountId, EntityType, EntityCapabilities } from '../../types';
 
 // ============================================================================
@@ -204,6 +205,26 @@ export class EntityRepository {
    * queue_empty on its own will call a dead agent busy.
    */
   updateQueueEmpty(id: EntityId, queueEmpty: boolean): void {
+    // A declaration the evidence contradicts is REFUSED, not corrected.
+    //
+    // CireSnave's ruling: "queue_empty = true while the queue is not empty is
+    // an error." Silently writing `false` instead would be indistinguishable
+    // from success to the caller, who would then believe a declaration that was
+    // never accepted — the same shape as a route that answers 200 for work it
+    // did not do.
+    //
+    // Only `true` is checkable. FAM observes undelivered messages and nothing
+    // else; it can DISPROVE an empty queue but never prove one, because an
+    // agent's internal task list is invisible here. So declaring NOT-empty is
+    // always permitted: an agent with an empty inbox may still have plenty to
+    // do, and refusing that would be FAM asserting something it cannot see.
+    if (queueEmpty) {
+      const pending = this.undeliveredCount(id);
+      if (pending > 0) {
+        throw new QueueNotEmptyError(id, pending);
+      }
+    }
+
     const value = queueEmpty ? 1 : 0;
     const stmt = this.db.prepare(`
       UPDATE entities
@@ -288,6 +309,61 @@ export class EntityRepository {
     `);
 
     stmt.run(accountId);
+  }
+
+  /**
+   * Recompute `queue_empty` from the queue FAM can actually see.
+   *
+   * An OPERATION, not a setter: the caller supplies no value, because a route
+   * that accepts a boolean will eventually be sent one, and this exists
+   * precisely so that an account holder cannot assert a queue state on their
+   * entity's behalf.
+   *
+   * A CORRECTION rather than a recompute, because the evidence is one-sided:
+   *
+   *   undelivered > 0  -> work is definitely pending: overwrite with `false`.
+   *   undelivered = 0  -> proves nothing about internal work: LEAVE IT ALONE.
+   *
+   * Asserting `true` on an empty inbox would be FAM inventing a declaration on
+   * the entity's behalf, which is what the nullable column exists to prevent.
+   * Returns what it observed so the caller learns something even when nothing
+   * changed.
+   */
+  rederiveQueueEmpty(id: EntityId): {
+    queue_empty: boolean | null;
+    undelivered: number;
+    corrected: boolean;
+  } {
+    const undelivered = this.undeliveredCount(id);
+    const before = this.getById(id)?.queue_empty ?? null;
+
+    if (undelivered === 0) {
+      return { queue_empty: before, undelivered, corrected: false };
+    }
+
+    const corrected = before !== false;
+    if (corrected) {
+      this.db
+        .prepare(
+          `UPDATE entities
+           SET queue_empty = 0, last_state_change = datetime('now')
+           WHERE id = ?`
+        )
+        .run(id);
+    }
+
+    return { queue_empty: false, undelivered, corrected };
+  }
+
+  /** Messages fanned out to this entity and not yet acknowledged. */
+  private undeliveredCount(id: EntityId): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as count FROM message_deliveries
+         WHERE recipient_entity_id = ? AND delivered = 0`
+      )
+      .get(id) as { count: number };
+    return row.count;
   }
 
   // --------------------------------------------------------------------------

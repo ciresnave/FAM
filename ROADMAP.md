@@ -633,7 +633,77 @@ cannot say whether anything is happening.
   failure. `addColumnIfMissing` covers it; the rewind test caught the bare
   ALTER immediately.
 
-### BLOCKED — availability toggle needs a ruling, and it now governs THREE fields
+### Account-Holder Control — RULED and built
+
+> **CireSnave:** "An account holder should be able to change their entity's
+> availability. They should be able to have `queue_empty` rederived from the
+> queue itself, but they should not be able to set it to an invalid setting —
+> `queue_empty = true` while the queue is not empty is an error."
+
+Two fields, two different mechanisms, and the difference is the interesting part.
+
+**`availability` — a WRITE.** `POST /admin/api/entities/availability`. Nothing
+external can contradict an intent, so an account holder setting it is exercising
+authority over their own agent. Routed through `wsManager.setAvailability`, the
+same call the entity's own route makes, so it broadcasts and flushes the queued
+backlog identically. Writing the column directly would have been a second
+availability path that agrees on the value and differs on the behaviour — the
+harder kind of divergence to notice.
+
+**`queue_empty` — a DERIVATION, never a write.** `POST
+/admin/api/entities/rederive-queue` accepts no value, and supplying one is
+**refused rather than ignored**: ignoring it lets a caller believe they set
+something they did not.
+
+**WHICH QUEUE — the ambiguity in the ruling, resolved and stated.** FAM observes
+exactly one queue: undelivered messages. It cannot see an agent's internal task
+list, which is why the field was declared rather than computed to begin with.
+That asymmetry decides everything:
+
+```
+FAM CAN DISPROVE "empty"  -- messages are waiting, so work is pending.
+FAM CANNOT PROVE "empty"  -- an empty inbox says nothing about internal work.
+```
+
+So rederivation is a **correction**, not a recompute: it overwrites a value the
+evidence contradicts and leaves alone one it merely cannot confirm. Asserting
+`true` on an empty inbox would be FAM inventing a declaration on the entity's
+behalf — precisely what the nullable column exists to prevent.
+
+And the error is an **error**. `updateQueueEmpty(id, true)` with messages
+waiting throws `QueueNotEmptyError` (409, carrying the count) rather than
+quietly writing `false`. A silent correction is indistinguishable from success
+to the caller, who then believes a declaration that was never accepted.
+
+**Consequence worth holding: the refusal binds the ENTITY too, not just the
+account holder.** The invariant lives in the repository, so an agent declaring
+its own queue empty while messages wait is refused on the same terms. That is
+the right place for it — a rule enforced at one route is a rule the next route
+forgets.
+
+**One of the three is pullable.** With rederivation available, `queue_empty` can
+be refreshed on demand by an outside party; `last_state_change` and session
+liveness can only ever be pushed. A supervisor suspecting a stall can force a
+current answer for one of the three.
+
+### KNOWN FLAKE — encryption tests, unexplained
+
+`Encryption > fails decryption with wrong passkey` and `> produces different
+ciphertext with different passkeys` have failed **twice in roughly six full-suite
+runs**, both times at ~18s, never on demand. They pass in isolation (3/3, 11s)
+and the suite passes on re-run (322/0).
+
+**Not dismissed, because of WHICH tests they are.** "Fails decryption with a
+wrong passkey" going red is consistent with a negative control passing — the
+one failure class this codebase has spent the most effort hunting. It is also
+consistent with resource pressure: Argon2id at 64MB/t=3/p=4 across concurrently
+executing test files.
+
+Two attempts to capture the failure message did not reproduce it. **Wanted: the
+actual assertion text.** Until then this is an open question, not a known-benign
+flake, and it should not be re-run away.
+
+### RESOLVED — availability toggle (was blocked on a ruling)
 
 The console cannot set an entity's availability, and should not until this is
 decided. `/entities/availability` requires an ENTITY session: availability is

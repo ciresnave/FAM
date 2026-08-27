@@ -57,6 +57,31 @@ export class ConflictError extends FamError {
   }
 }
 
+/**
+ * Refuses a `queue_empty = true` declaration that the queue contradicts.
+ *
+ * 409 rather than 400: the request is well-formed and would have been valid a
+ * moment ago — it conflicts with current state, which is exactly what 409 is
+ * for. A 400 would tell the caller to fix their request, and there is nothing
+ * wrong with it.
+ *
+ * Carries the count, because "you have work pending" is actionable and "that
+ * was rejected" is not.
+ */
+export class QueueNotEmptyError extends FamError {
+  public readonly undelivered: number;
+
+  constructor(entityId: string, undelivered: number) {
+    super(
+      `Cannot declare an empty queue for ${entityId}: ${undelivered} message(s) ` +
+        'are waiting to be collected. Collect them, or declare queue_empty=false.',
+      'QUEUE_NOT_EMPTY',
+      409
+    );
+    this.undelivered = undelivered;
+  }
+}
+
 export class ValidationError extends FamError {
   public readonly field?: string;
 

@@ -43,7 +43,7 @@ export function setupRoutes(
     ...channelRoutes(ctx, wsManager),
     ...messageRoutes(ctx, sendService),
     ...healthRoutes(ctx),
-    ...adminRoutes(ctx),
+    ...adminRoutes(ctx, wsManager),
     ...adminSessionRoutes(ctx),
     ...adminUiRoutes(),
   ];

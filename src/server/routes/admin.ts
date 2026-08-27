@@ -14,6 +14,7 @@ import {
 } from '../../types/errors';
 import { validateEntityId, validateAccountId } from '../../types/validation';
 import { requireAccountAuth } from '../middleware/auth';
+import type { WebSocketManager } from '../websocket';
 
 // ============================================================================
 // Helpers
@@ -23,7 +24,10 @@ import { requireAccountAuth } from '../middleware/auth';
 // Admin Routes
 // ============================================================================
 
-export function adminRoutes(ctx: DatabaseContext): Route[] {
+export function adminRoutes(
+  ctx: DatabaseContext,
+  wsManager: WebSocketManager
+): Route[] {
   return [
     // POST /admin/api/grants
     // Grant another account access to one of my entities.
@@ -254,6 +258,94 @@ export function adminRoutes(ctx: DatabaseContext): Route[] {
         return new Response(
           JSON.stringify({ rule }),
           { status: 201, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
+    // POST /admin/api/entities/availability
+    // An account holder sets availability on one of THEIR OWN entities.
+    //
+    // Ruled by CireSnave: "An account holder should be able to change their
+    // entity's availability." It is their agent, and one that will not go quiet
+    // is worse than one whose owner can quiet it.
+    //
+    // Goes through wsManager.setAvailability — the same call the entity's own
+    // route makes — so this broadcasts and flushes the queued backlog exactly
+    // as a self-declaration does. Writing the column directly here would be a
+    // second availability path that agrees on the value and differs on the
+    // behaviour, which is the harder kind of divergence to notice.
+    {
+      method: 'POST',
+      pattern: '/admin/api/entities/availability',
+      handler: async (req) => {
+        const { accountId, body } = await requireAccountAuth(ctx, req);
+        const { entity_id: entityId, availability } = body;
+
+        if (!entityId || !availability) {
+          throw new ValidationError('entity_id and availability are required');
+        }
+        if (!['available', 'unavailable'].includes(availability)) {
+          throw new ValidationError('availability must be "available" or "unavailable"');
+        }
+
+        // Same answer for "not yours" and "does not exist" — the console must
+        // not become an entity-existence oracle for other accounts.
+        const entity = ctx.entities.getById(entityId);
+        if (!entity || entity.account_id !== accountId) {
+          throw new NotFoundError('Entity in your account', entityId);
+        }
+
+        const flushed = await wsManager.setAvailability(entityId, availability);
+
+        return new Response(
+          JSON.stringify({ ok: true, entity_id: entityId, availability, messages_pushed: flushed }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
+    // POST /admin/api/entities/rederive-queue
+    // Recompute queue_empty from the queue FAM can observe.
+    //
+    // Ruled by CireSnave: an account holder may have queue_empty "rederived
+    // from the queue itself", but may NOT set it — "queue_empty = true while
+    // the queue is not empty is an error."
+    //
+    // So this takes NO value. A route that accepts a boolean will eventually be
+    // sent one, and the whole point is that the account holder cannot assert a
+    // queue state on the entity's behalf. It corrects what the evidence
+    // contradicts and leaves alone what it merely cannot confirm.
+    {
+      method: 'POST',
+      pattern: '/admin/api/entities/rederive-queue',
+      handler: async (req) => {
+        const { accountId, body } = await requireAccountAuth(ctx, req);
+        const { entity_id: entityId } = body;
+
+        if (!entityId) {
+          throw new ValidationError('entity_id is required');
+        }
+        // Refuse a supplied value rather than ignoring it. Ignoring it would
+        // let a caller believe they had set something they had not — the
+        // silent-success shape this whole field is designed against.
+        if ('queue_empty' in body) {
+          throw new ValidationError(
+            'queue_empty is not accepted here: this operation DERIVES the value ' +
+              'from the queue. Only the entity itself may declare it, via ' +
+              'POST /entities/queue-state.'
+          );
+        }
+
+        const entity = ctx.entities.getById(entityId);
+        if (!entity || entity.account_id !== accountId) {
+          throw new NotFoundError('Entity in your account', entityId);
+        }
+
+        const result = ctx.entities.rederiveQueueEmpty(entityId);
+
+        return new Response(
+          JSON.stringify({ ok: true, entity_id: entityId, ...result }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
       },
     },

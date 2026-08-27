@@ -129,6 +129,9 @@
         last said something changed — not when it was last seen. An agent with a
         non-empty queue and an old declaration is either working one long task or
         stopped mid-task; only its connection tells you which.
+        You may pause or resume your own agents. You cannot set their queue
+        state — only ask FAM to recheck it against messages actually waiting,
+        since nothing out here can see an agent's own task list.
       </p>
       <div class="panel">
         <form id="entity-form">
@@ -332,9 +335,49 @@ async function loadAgents() {
     tr.appendChild(rel);
 
     const actions = document.createElement('td');
-    // Only your own. An entity someone shared with you is theirs to revoke,
-    // and the button would fail server-side anyway — better not to offer it.
+    // Only your own. An entity someone shared with you is theirs to manage,
+    // and the buttons would fail server-side anyway — better not to offer them.
     if (e.relationship === 'owned') {
+      // Availability is yours to set: it is your agent, and one that will not
+      // go quiet is worse than one whose owner can quiet it.
+      const next = e.availability === 'available' ? 'unavailable' : 'available';
+      const av = document.createElement('button');
+      av.className = 'link';
+      av.style.color = 'var(--muted)';
+      av.style.marginRight = '10px';
+      av.textContent = next === 'unavailable' ? 'Pause' : 'Resume';
+      av.onclick = async () => {
+        try {
+          const r = await api('/admin/api/entities/availability', {
+            entity_id: e.id, availability: next,
+          });
+          await loadAgents();
+          note('msg', r.messages_pushed
+            ? `${e.id} resumed — ${r.messages_pushed} queued message(s) delivered.`
+            : `${e.id} is now ${next}.`, 'ok');
+        } catch (err) { note('msg', err.message); }
+      };
+      actions.appendChild(av);
+
+      // Queue state is NOT yours to set — you ask FAM to recheck it. The button
+      // sends no value, because the entity is the only thing that may declare
+      // one and FAM can only ever contradict a claim, never confirm it.
+      const rq = document.createElement('button');
+      rq.className = 'link';
+      rq.style.color = 'var(--muted)';
+      rq.style.marginRight = '10px';
+      rq.textContent = 'Recheck queue';
+      rq.onclick = async () => {
+        try {
+          const r = await api('/admin/api/entities/rederive-queue', { entity_id: e.id });
+          await loadAgents();
+          note('msg', r.corrected
+            ? `${e.id}: ${r.undelivered} message(s) waiting — corrected to "has work".`
+            : `${e.id}: ${r.undelivered} message(s) waiting. Nothing to correct.`, 'ok');
+        } catch (err) { note('msg', err.message); }
+      };
+      actions.appendChild(rq);
+
       const b = document.createElement('button');
       b.className = 'link';
       b.textContent = 'Revoke';

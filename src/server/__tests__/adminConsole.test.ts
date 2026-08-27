@@ -412,3 +412,93 @@ describe('managing entities from the console', () => {
     expect(status).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CireSnave's ruling, at the API.
+//
+//   "An account holder should be able to change their entity's availability.
+//    They should be able to have queue_empty rederived from the queue itself,
+//    but they should not be able to set it to an invalid setting — queue_empty
+//    = true while the queue is not empty is an error."
+//
+// Two different mechanisms, deliberately. Availability is genuinely declared —
+// nothing can contradict it, so an account holder setting it is exercising
+// authority over their own agent. queue_empty has a ground truth FAM can see,
+// so the account holder gets a DERIVATION and never a write.
+// ---------------------------------------------------------------------------
+
+describe('an account holder may set availability on their own entity', () => {
+  test('the change is applied', async () => {
+    const { status, json } = await post(
+      '/admin/api/entities/availability',
+      { entity_id: `shared@${ACCOUNT}`, availability: 'unavailable' },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    expect(status).toBe(200);
+    expect(json.availability).toBe('unavailable');
+  });
+
+  test('an entity of another account is refused, identically to a missing one', async () => {
+    const foreign = await post(
+      '/admin/api/entities/availability',
+      { entity_id: `someone@${OTHER_ACCOUNT}`, availability: 'unavailable' },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    const missing = await post(
+      '/admin/api/entities/availability',
+      { entity_id: 'nothing@nowhere.test', availability: 'unavailable' },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    // Compare the TEMPLATE, not the raw strings. Each message echoes the id the
+    // caller supplied, so the strings differ by construction — and an echo of
+    // your own input discloses nothing. What would be an oracle is a different
+    // SHAPE for the two cases: "not yours" versus "no such entity".
+    const shape = (err: string, id: string) => err.split(id).join('<id>');
+
+    expect(foreign.status).toBe(missing.status);
+    expect(shape(foreign.json.error, `someone@${OTHER_ACCOUNT}`)).toBe(
+      shape(missing.json.error, 'nothing@nowhere.test')
+    );
+  });
+});
+
+describe('an account holder may DERIVE queue state but never set it', () => {
+  test('rederivation reports what it observed', async () => {
+    const { status, json } = await post(
+      '/admin/api/entities/rederive-queue',
+      { entity_id: `shared@${ACCOUNT}` },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    expect(status).toBe(200);
+    expect(typeof json.undelivered).toBe('number');
+    expect(typeof json.corrected).toBe('boolean');
+  });
+
+  // THE LOAD-BEARING ONE. If the route quietly ignores a supplied value, the
+  // caller believes they set something they did not — which is the exact
+  // silent-success shape this field is designed against.
+  test('supplying queue_empty is REFUSED, not ignored', async () => {
+    const { status, json } = await post(
+      '/admin/api/entities/rederive-queue',
+      { entity_id: `shared@${ACCOUNT}`, queue_empty: true },
+      { Cookie: cookie, [CSRF_HEADER]: csrf }
+    );
+    expect(status).toBe(400);
+    expect(json.error).toMatch(/not accepted/i);
+  });
+
+  test('there is no admin route that writes queue_empty at all', async () => {
+    const { setupRoutes } = await import('../routes');
+    const { WebSocketManager } = await import('../websocket');
+    const { MessageSendService } = await import('../services/messageSend');
+    const { PermissionChecker } = await import('../services/permissionChecker');
+    const ctx = getDatabaseContext();
+    const wsm = new WebSocketManager(ctx);
+    const routes = setupRoutes(ctx, wsm, new MessageSendService(ctx, wsm, new PermissionChecker(ctx)));
+
+    const admin = [...routes.keys()].filter(p => p.startsWith('/admin/'));
+    // Derivation is allowed; a setter is not. Named explicitly so adding one
+    // later has to come past this test.
+    expect(admin.filter(p => /queue/.test(p))).toEqual(['/admin/api/entities/rederive-queue']);
+  });
+});

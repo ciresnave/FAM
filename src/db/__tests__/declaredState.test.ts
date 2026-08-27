@@ -190,3 +190,113 @@ describe('separating a long task from a dead agent needs the heartbeat too', () 
     expect(ctx.sessions.isActive(AGENT)).toBe(true); // reads as one long task
   });
 });
+
+// ---------------------------------------------------------------------------
+// CireSnave's ruling: "They should be able to have queue_empty rederived from
+// the queue itself, but they should not be able to set it to an invalid
+// setting — queue_empty = true while the queue is not empty is an error."
+//
+// WHICH QUEUE. FAM observes exactly one: undelivered messages. It cannot see an
+// agent's internal task list, which is why the field was declared rather than
+// computed in the first place. That asymmetry decides the whole design:
+//
+//   FAM CAN DISPROVE "empty"  — messages are waiting, so work is pending.
+//   FAM CANNOT PROVE "empty"  — an empty inbox says nothing about internal work.
+//
+// So rederivation is a CORRECTION, not a recompute. It overwrites a value the
+// evidence contradicts and leaves alone one it merely cannot confirm. A
+// rederivation that asserted `true` on an empty inbox would be FAM inventing a
+// declaration on the entity's behalf — the exact thing the nullable default
+// exists to prevent.
+//
+// And the error must be an ERROR. Silently writing `false` over a bad `true`
+// is indistinguishable from success to the caller, who then believes a
+// declaration that was never accepted.
+// ---------------------------------------------------------------------------
+
+describe('a declaration the queue contradicts is refused', () => {
+  const BUSY = `busy@${ACCOUNT}`;
+  const SENDER = `sender@${ACCOUNT}`;
+
+  beforeAll(async () => {
+    for (const id of [BUSY, SENDER]) {
+      ctx.db
+        .prepare(
+          `INSERT OR IGNORE INTO entities (id, account_id, type, public_key, capabilities)
+           VALUES (?, ?, 'agent', 'pk', '{"can_send":true}')`
+        )
+        .run(id, ACCOUNT);
+    }
+    await ctx.messages.sendDirectMessage(SENDER, BUSY, 'work for you');
+  });
+
+  test('declaring EMPTY with messages waiting is an error', () => {
+    expect(ctx.messages.getUndeliveredCount(BUSY)).toBeGreaterThan(0);
+    expect(() => ctx.entities.updateQueueEmpty(BUSY, true)).toThrow();
+  });
+
+  test('the refusal does not quietly write something else', () => {
+    const before = ctx.entities.getById(BUSY)!.queue_empty;
+    try { ctx.entities.updateQueueEmpty(BUSY, true); } catch { /* expected */ }
+    expect(ctx.entities.getById(BUSY)!.queue_empty).toBe(before);
+  });
+
+  // Declaring BUSY is never contradicted: FAM cannot see internal work, so an
+  // agent with an empty inbox may still legitimately have plenty to do.
+  test('declaring NOT-empty is always allowed', () => {
+    expect(() => ctx.entities.updateQueueEmpty(QUIET, false)).not.toThrow();
+    expect(ctx.entities.getById(QUIET)!.queue_empty).toBe(false);
+  });
+
+  test('declaring empty is allowed once the queue drains', async () => {
+    const pending = await ctx.messages.getUndelivered(BUSY);
+    ctx.messages.markDelivered(BUSY, pending.map(m => m.id));
+    expect(ctx.messages.getUndeliveredCount(BUSY)).toBe(0);
+    expect(() => ctx.entities.updateQueueEmpty(BUSY, true)).not.toThrow();
+  });
+});
+
+describe('rederivation corrects what the evidence contradicts', () => {
+  const STALE = `stale@${ACCOUNT}`;
+  const SENDER2 = `sender2@${ACCOUNT}`;
+
+  beforeAll(() => {
+    for (const id of [STALE, SENDER2]) {
+      ctx.db
+        .prepare(
+          `INSERT OR IGNORE INTO entities (id, account_id, type, public_key, capabilities)
+           VALUES (?, ?, 'agent', 'pk', '{"can_send":true}')`
+        )
+        .run(id, ACCOUNT);
+    }
+  });
+
+  test('with messages waiting it sets NOT-empty', async () => {
+    ctx.entities.updateQueueEmpty(STALE, true); // legitimate when declared
+    await ctx.messages.sendDirectMessage(SENDER2, STALE, 'arrived after');
+
+    const result = ctx.entities.rederiveQueueEmpty(STALE);
+
+    expect(result.queue_empty).toBe(false);
+    expect(result.corrected).toBe(true);
+    expect(ctx.entities.getById(STALE)!.queue_empty).toBe(false);
+  });
+
+  // FAM cannot prove an empty queue, so it must not assert one. Leaving the
+  // entity's own declaration standing is the honest outcome.
+  test('with an empty queue it leaves the declaration ALONE', async () => {
+    const pending = await ctx.messages.getUndelivered(STALE);
+    ctx.messages.markDelivered(STALE, pending.map(m => m.id));
+    ctx.entities.updateQueueEmpty(STALE, true);
+
+    const result = ctx.entities.rederiveQueueEmpty(STALE);
+
+    expect(result.corrected).toBe(false);
+    expect(ctx.entities.getById(STALE)!.queue_empty).toBe(true);
+  });
+
+  test('it reports what it observed, so the caller learns something', () => {
+    const result = ctx.entities.rederiveQueueEmpty(STALE);
+    expect(typeof result.undelivered).toBe('number');
+  });
+});

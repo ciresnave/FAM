@@ -579,7 +579,53 @@ duplicate is a conflict now.
     satisfy the test would have deleted something true to guard against a thing
     it does not do.
 
-### BLOCKED — availability toggle needs a ruling, not work
+### Declared State — `queue_empty` and `last_state_change` (migration v11)
+
+Requested by CireSnave. Both are DECLARED state and sit beside `availability`,
+not beside `status` — only the entity knows whether it has work queued, and
+nothing external can derive it.
+
+**The measurement that motivated them:** in one sweep of the claude-peers
+network all 17 peers reported `Last seen` inside a **9.5-second window** while
+two agents had been idle for hours. A heartbeat says a process is breathing; it
+cannot say whether anything is happening.
+
+- `last_state_change` records a **CHANGE**, not a declaration. Re-stating the
+  same value does not move it — otherwise an agent looping on one state looks
+  perpetually fresh, which is the heartbeat failure coming back through the
+  front door. The discriminating test is the negative one: **a heartbeat must
+  not move it**, and neither may a status change.
+- `queue_empty` is **nullable**, and null means NEVER DECLARED — a different
+  claim from a declared `false`. Defaulting to 0 would make every silent entity
+  look busy and defaulting to 1 would make them all look idle; both invent a
+  declaration nobody made. The row mapper preserves null rather than coercing,
+  because it is the one place every reader passes through.
+- **It is a TRIPLE, not a pair.** The framing this arrived under was that
+  `queue_empty=false` plus an old timestamp means stalled. It does not, quite:
+  an agent working steadily on ONE long task has not changed state, so its
+  timestamp is legitimately old. What separates a long task from a dead agent is
+  liveness — the very thing `last_state_change` refuses to encode.
+
+  ```
+  queue_empty=0, timestamp fresh                  -> working, changing
+  queue_empty=0, timestamp old, session live      -> one long task
+  queue_empty=0, timestamp old, no live session   -> died mid-task
+  ```
+
+  Written as a test rather than a comment, because the two-field reading is the
+  intuitive one and will be re-derived by whoever meets the columns next.
+- `POST /entities/queue-state` requires an ENTITY session and an explicit
+  boolean. Truthy coercion would let a client send the string `"false"` and
+  declare the opposite of what it means, on a field read to decide whether work
+  gets dispatched.
+- **Migration steps may now be functions.** SQLite has no
+  `ADD COLUMN IF NOT EXISTS`, and every migration here is expected to survive
+  re-application — 7 through 10 all use `IF NOT EXISTS` deliberately. A step
+  that cannot be repeated is also one that cannot be retried after a partial
+  failure. `addColumnIfMissing` covers it; the rewind test caught the bare
+  ALTER immediately.
+
+### BLOCKED — availability toggle needs a ruling, and it now governs THREE fields
 
 The console cannot set an entity's availability, and should not until this is
 decided. `/entities/availability` requires an ENTITY session: availability is
@@ -595,6 +641,15 @@ is worse) or a quiet collapse of the distinction the model rests on.
 entities unavailable, overriding what the entity itself declares? If yes, it is
 a new account-scoped route and one screen. If no, the console shows availability
 read-only, which is what it does today.
+
+**The same ruling now governs `queue_empty`, and there it is sharper.** An
+account holder marking an agent's queue empty when the agent has not said so is
+the same override — but a supervisor reading that field dispatches work on it,
+so a wrong declaration sends work to something mid-task. A yes for availability
+is not automatically a yes for this one.
+
+`last_state_change` needs no ruling: nobody sets it directly. It is stamped by
+whichever declaration moved, so it inherits whatever the other two decide.
 
 
 ### Phase 6 — Test Backlog & Data-Model Fixes

@@ -736,22 +736,43 @@ terrible.**
 
 Fixed by deleting overrides that should not have existed, not by raising them.
 
-### STILL OPEN — the crypto flake is explained but not reproduced
+### CLOSED — the crypto flake was a timeout, settled by its own duration
 
-The mechanism above is consistent with every observation, and the 15s budget is
-confirmed by measurement. **The event itself was never reproduced**: two
-occurrences in roughly six runs here, and zero in the PM's eight-run loop.
+Carried as open on the grounds that the mechanism was explained but the event
+never reproduced. **It is closeable, and the deciding evidence was in hand the
+whole time — I was waiting for the wrong thing.**
 
-Kept open deliberately. If it recurs, the discriminator is one string in the
-output:
+I said the discriminator was the assertion text: `"timed out after ..."` versus
+`"expected promise to reject, but it resolved"`. **The recorded DURATIONS settle
+it without that.**
 
 ```
-timeout                 "^ this test timed out after ..."
-negative control passed "expected promise to reject, but it resolved"
+per-test budget (the `}, 15000)` override, since removed):  15000 ms
+observed failures:                          16120 / 18200 / 18199 ms
+uncontended cost of those tests:            ~4300 ms each
 ```
 
-The first is benign and now unlikely. The second would be serious. **Do not
-re-run it away — read the line.**
+**A test that reports a duration greater than its own timeout was killed by the
+deadline.** An assertion failure requires the test to run to COMPLETION, and a
+test that completes does so within its budget or is killed first — so any
+duration above the budget is a timeout by construction. All three exceeded it.
+A negative control passing would have surfaced at roughly the normal ~4.3s.
+
+The cause is understood and removed: three per-test overrides granting 15s where
+the project deliberately allows 60, on the three slowest tests in the suite.
+Zero recurrences since.
+
+**The lesson is the one worth keeping.** The timing was in every report I filed
+and I read it as incidental to the failure rather than as evidence about it.
+**I held out for a stronger discriminator while a sufficient one sat in the
+numbers I had already written down** — which is the same shape as everything
+else this file records: the answer present one step from where someone stopped.
+
+**Guarded against recurrence** by `src/__tests__/testTimeouts.test.ts`: no test
+may give itself LESS time than the project budget. A larger override is fine —
+a slow test asking for more room is deliberate. Asking for less than the project
+already decided is almost always a number copied from somewhere it made sense.
+Mutation-verified: reintroducing a `}, 15000)` reddens it.
 
 ### Superseded note — encryption tests, when the mechanism was unknown
 

@@ -853,7 +853,32 @@ predecessor system, not speculative hardening. Ordered by measured impact.
   availability is honest-broadcast, not enforced truth — it reports what a peer
   declared, not whether it will reply. Generalized rule: **any outcome that is
   not delivery must be legible to the sender.**
-- **Free-text summary field on entities.** Regression vs claude-peers, which has
+- **Free-text summary field on entities. DONE** (migration v12). `entities.summary`
+  plus `POST /entities/summary`, `fam_set_summary` in the MCP adapter, and a
+  "Doing" column in the console. Entity session required — the value of the
+  field is that nobody else wrote the words. Bounded at 500 characters and
+  **refused rather than truncated**, because a cut-off summary is a claim the
+  entity did not make.
+
+- **Staleness stamps on summaries. DONE**, and the plan's own suggestion was the
+  bug. It proposed reusing `last_seen` — *"already recorded, so rendering 'set
+  4d ago' is nearly free"*. **`last_seen` is CONNECTION-DERIVED.** A live agent
+  carrying a six-month-old summary would render "set 2 minutes ago", which is
+  exactly the misreading the item exists to prevent, implemented by the fix.
+  Shipped as `summary_set_at`, recording when the summary was ASSERTED.
+  - **Deliberately opposite to `last_state_change`.** That records a CHANGE and
+    ignores repeats. This refreshes on every assertion including a repeat,
+    because staleness asks when someone last VOUCHED for the words — "still
+    true" is new information about an old sentence. Two timestamp columns whose
+    correct behaviour on a repeat is opposite, which is why each has a test
+    naming the other.
+  - The console renders the summary and its age **in one cell**, so a column
+    reorder or a copied string cannot separate them. Mutation-verified: removing
+    the age reddens exactly the two tests that exist for it.
+  - The MCP tool tells agents to **re-set a summary that is still true**, since
+    a stale summary is worse than none and only the entity can refresh it.
+
+- ~~**Free-text summary field on entities.**~~ Regression vs claude-peers, which has
   `set_summary`. `display_name` + `capabilities` describe identity but not
   current intent, and intent is what routing actually needs. Field data: of 17
   peers, the 5 with summaries were the only ones routable without broadcasting;

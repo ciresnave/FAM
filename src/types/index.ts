@@ -70,6 +70,26 @@ export interface Entity {
    */
   last_state_change: string | null;
 
+  /**
+   * Free-text statement of what this entity is currently doing.
+   *
+   * Identity is `display_name` + `capabilities`; this is INTENT, which is what
+   * routing actually needs. Null until the entity says something.
+   */
+  summary: string | null;
+
+  /**
+   * When the summary was last ASSERTED — not when the entity was last seen.
+   *
+   * Refreshed by every assertion including a repeat of the same text, because
+   * staleness asks when someone last vouched for those words. Deliberately
+   * opposite to `last_state_change`, which records a change and ignores
+   * repeats, and emphatically not `last_seen`: a live process can carry a
+   * six-month-old summary, and reporting its connection time as the summary's
+   * age is the exact misreading this field exists to prevent.
+   */
+  summary_set_at: string | null;
+
   created_at: string;
   last_seen: string | null;
 }

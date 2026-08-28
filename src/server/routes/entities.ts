@@ -223,6 +223,39 @@ export function entityRoutes(
       },
     },
     
+    // POST /entities/summary
+    // Set or clear this entity's free-text statement of what it is doing.
+    //
+    // Entity session required: it is the entity's own words, and the value of
+    // the field is precisely that nobody else wrote them.
+    {
+      method: 'POST',
+      pattern: '/entities/summary',
+      handler: async (req) => {
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { summary } = body;
+
+        if (summary !== null && summary !== undefined && typeof summary !== 'string') {
+          return new Response(
+            JSON.stringify({ error: 'summary must be a string, or null to clear it' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        ctx.entities.updateSummary(entity_id, summary ?? null);
+        const entity = ctx.entities.getById(entity_id)!;
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            summary: entity.summary,
+            summary_set_at: entity.summary_set_at,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
     // POST /entities/queue-state
     // Declare whether this entity's work queue is empty.
     //

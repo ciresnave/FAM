@@ -230,6 +230,10 @@ Available tools:
   QUEUED. Read it. A queued message has not been seen, so silence from that peer
   is not an answer and waiting on one is a mistake.
 - fam_set_availability: Pause/resume incoming messages (available/unavailable)
+- fam_set_summary: One or two sentences on what you are working on. This is how
+  others route to you instead of broadcasting. Set it when you start something,
+  and re-set it when it is still true — readers see its age and discount old
+  summaries, so a stale one is worse than none.
 - fam_set_queue_state: Declare whether you have work pending. Nothing else can
   tell — being alive is not the same as being busy. Declare false when you take
   work on and true when you finish; declaring only one edge is worse than not
@@ -425,6 +429,25 @@ When you start, proactively list entities and channels to understand who's avail
           };
         }
         
+        case 'fam_set_summary': {
+          const { summary } = args as any;
+          if (summary !== null && typeof summary !== 'string') {
+            return {
+              content: [{ type: 'text' as const, text: 'summary must be a string, or null to clear it' }],
+              isError: true,
+            };
+          }
+          const r = await client.setSummary(summary);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: r.summary
+                ? `Summary set. Re-set it when it is still true — others see how long ago you last said it.`
+                : 'Summary cleared.',
+            }],
+          };
+        }
+
         case 'fam_set_queue_state': {
           const { queue_empty } = args as any;
           // Explicit boolean only. Truthy coercion would let the string

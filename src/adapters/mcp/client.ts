@@ -294,6 +294,32 @@ export class FamClient {
   }
   
   /**
+   * Set or clear your free-text summary of what you are currently doing.
+   *
+   * This is what makes you routable without anyone broadcasting: name and
+   * capabilities say who you are, this says what you are on. Pass null to
+   * clear it.
+   *
+   * RE-SET IT WHEN IT IS STILL TRUE. The stamp records when you last vouched
+   * for these words, not when you last changed them, and readers use the age
+   * to decide how much to trust it.
+   */
+  async setSummary(summary: string | null): Promise<{
+    ok: boolean;
+    summary: string | null;
+    summary_set_at: string | null;
+  }> {
+    if (!this.entityId || !this.sessionId) {
+      throw new Error('Not authenticated');
+    }
+    return this.request('/entities/summary', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      summary,
+    });
+  }
+
+  /**
    * Declare whether your work queue is empty.
    *
    * DECLARED state — nothing outside this process can derive it. A heartbeat

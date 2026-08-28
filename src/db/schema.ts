@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 12;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -397,6 +397,29 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // make them all look idle; both invent a declaration nobody made.
     addColumnIfMissing('entities', 'queue_empty', 'INTEGER'),
     addColumnIfMissing('entities', 'last_state_change', 'TEXT'),
+  ],
+  12: [
+    // A free-text summary of what an entity is currently doing, plus a stamp
+    // recording when it last said so.
+    //
+    // WHY: of 17 peers observed on the predecessor system, the 5 carrying
+    // summaries were the only ones routable without broadcasting to everybody.
+    // Name and capabilities describe identity; routing needs current INTENT.
+    //
+    // WHY THE STAMP IS NOT last_seen — and the plan proposed exactly that,
+    // "already recorded, so rendering 'set 4d ago' is nearly free". last_seen
+    // is CONNECTION-DERIVED. A live agent carrying a six-month-old summary
+    // would render "set 2 minutes ago", which is the misreading the stamp
+    // exists to prevent, implemented by the fix. Observed harm from the real
+    // version: a four-day-old summary read as current caused one project to act
+    // on work that had already shipped.
+    //
+    // AND IT DIFFERS FROM last_state_change ON PURPOSE. That records a CHANGE,
+    // so a repeat must not move it. This records the last time someone VOUCHED
+    // for the text, so re-asserting the same summary DOES refresh it: "still
+    // true" is new information about an old sentence.
+    addColumnIfMissing('entities', 'summary', 'TEXT'),
+    addColumnIfMissing('entities', 'summary_set_at', 'TEXT'),
   ],
   9: [
     // Browser sessions for the admin console.

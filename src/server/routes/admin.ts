@@ -377,6 +377,10 @@ export function adminRoutes(
           // the entity never made.
           queue_empty: entity.queue_empty ?? null,
           last_state_change: entity.last_state_change ?? null,
+          // The summary travels WITH its stamp, always. Rendering one without
+          // the other is how a four-day-old statement reads as current.
+          summary: entity.summary ?? null,
+          summary_set_at: entity.summary_set_at ?? null,
           created_at: entity.created_at,
           relationship: entity.account_id === accountId ? 'owned' : 'granted',
         }));

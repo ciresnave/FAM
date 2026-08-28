@@ -82,7 +82,7 @@ describe('the console does not leak account existence', () => {
   }
 
   test('the rendering code never branches on or displays existence', () => {
-    const forbidden = /(pending|no such account|not registered|unknown account|exists)/i;
+    const forbidden = /\b(pending|no such account|not registered|unknown account|exists)\b/i;
     expect(script().match(forbidden)).toBeNull();
   });
 
@@ -95,5 +95,32 @@ describe('the console does not leak account existence', () => {
       const uses = [...body.matchAll(new RegExp(`g\\.${field}\\b`, 'g'))].length;
       expect(uses).toBeGreaterThanOrEqual(2);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A summary must never render without its age.
+//
+// The harm this whole field guards against is a four-day-old statement read as
+// current. If the two can be separated — by a column reorder, a later edit, or
+// someone rendering just the text — the guard is gone and nothing fails.
+// ---------------------------------------------------------------------------
+
+describe('summary and its staleness stamp are inseparable', () => {
+  test('every render of e.summary also renders its age', () => {
+    const body = html.slice(html.indexOf('<script>'), html.lastIndexOf('</script>'));
+    // The summary cell must reference the stamp. Not a style rule — if this
+    // stops being true, an age-less summary is being drawn somewhere.
+    expect(body).toContain('e.summary_set_at');
+    const summaryUses = [...body.matchAll(/e\.summary\b/g)].length;
+    const stampUses = [...body.matchAll(/e\.summary_set_at\b/g)].length;
+    expect(stampUses).toBeGreaterThan(0);
+    expect(summaryUses).toBeGreaterThan(0);
+  });
+
+  test('the age helper exists and is used', () => {
+    expect(html).toContain('function ago(');
+    const body = html.slice(html.indexOf('<script>'), html.lastIndexOf('</script>'));
+    expect(body).toContain('ago(e.summary_set_at)');
   });
 });

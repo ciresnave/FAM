@@ -129,6 +129,9 @@
         last said something changed — not when it was last seen. An agent with a
         non-empty queue and an old declaration is either working one long task or
         stopped mid-task; only its connection tells you which.
+        <strong>Doing</strong> is the entity's own sentence about its current
+        work, shown with how long ago it last said it — an old summary read as
+        current is worse than none.
         You may pause or resume your own agents. You cannot set their queue
         state — only ask FAM to recheck it against messages actually waiting,
         since nothing out here can see an agent's own task list.
@@ -165,7 +168,7 @@
         <p><button class="link" id="keyfile-dismiss">I have saved it — dismiss</button></p>
       </div>
       <div class="panel scroll"><table>
-        <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Queue</th><th>Last declared</th><th>Relationship</th><th></th></tr></thead>
+        <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Queue</th><th>Last declared</th><th>Doing</th><th>Relationship</th><th></th></tr></thead>
         <tbody id="agents-rows"></tbody>
       </table></div>
     </section>
@@ -286,6 +289,21 @@ function codeTd(text) {
   return cell;
 }
 
+// Renders "4d ago" style. A summary is NEVER shown without this beside it:
+// a four-day-old statement read as current is the harm the stamp exists to
+// prevent, and making the age optional makes it forgettable.
+function ago(iso) {
+  if (!iso) return null;
+  const t = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z').getTime();
+  if (isNaN(t)) return null;
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 function when(iso) {
   if (!iso) return '—';
   const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
@@ -327,6 +345,26 @@ async function loadAgents() {
         : (e.queue_empty ? 'empty' : 'has work')
     ));
     tr.appendChild(td(e.last_state_change ? when(e.last_state_change) : 'never'));
+
+    // Summary and its age are ONE cell, on purpose. They cannot be separated by
+    // a later edit, a column reorder, or someone copying the text out — which
+    // is how a stale statement gets read as a current one.
+    const sum = document.createElement('td');
+    if (!e.summary) {
+      sum.className = 'empty';
+      sum.textContent = '—';
+    } else {
+      const text = document.createElement('div');
+      text.textContent = e.summary;
+      const age = document.createElement('span');
+      age.className = 'chip';
+      const a = ago(e.summary_set_at);
+      age.textContent = a ? `said ${a}` : 'no timestamp';
+      sum.appendChild(text);
+      sum.appendChild(age);
+    }
+    tr.appendChild(sum);
+
     const rel = document.createElement('td');
     const chip = document.createElement('span');
     chip.className = 'chip';

@@ -158,6 +158,28 @@ export const FAM_TOOLS = [
     },
   },
   {
+    name: 'fam_set_summary',
+    description:
+      'Set a one or two sentence summary of what you are currently working on, ' +
+      'or pass null to clear it. This is what lets others route to you instead ' +
+      'of broadcasting: your name says who you are, this says what you are on. ' +
+      'Set it when you start something and RE-SET IT WHEN IT IS STILL TRUE — ' +
+      'readers see how long ago you last said it and discount old summaries, ' +
+      'so a stale one is worse than none. Max 500 characters; longer is ' +
+      'refused rather than cut, because a truncated summary is a claim you did ' +
+      'not make.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        summary: {
+          type: ['string', 'null'] as any,
+          description: 'What you are doing now, or null to clear',
+        },
+      },
+      required: ['summary'],
+    },
+  },
+  {
     name: 'fam_set_queue_state',
     description:
       "Declare whether your work queue is empty. Only you know this — nothing " +

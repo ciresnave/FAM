@@ -1,7 +1,10 @@
 // Entity Repository - CRUD Operations for Entities
 
 import { Database } from 'bun:sqlite';
-import { QueueNotEmptyError } from '../../types/errors';
+import { QueueNotEmptyError, ValidationError } from '../../types/errors';
+
+/** Long enough for a sentence or two of intent; short enough to stay scannable. */
+export const SUMMARY_MAX_LENGTH = 500;
 import type { Entity, EntityId, AccountId, EntityType, EntityCapabilities } from '../../types';
 
 // ============================================================================
@@ -312,6 +315,48 @@ export class EntityRepository {
   }
 
   /**
+   * Set (or clear) this entity's free-text summary of what it is doing.
+   *
+   * `null` or whitespace clears it, and clears the stamp with it — a stamp
+   * without a summary renders an age for nothing.
+   *
+   * THE STAMP IS REFRESHED ON EVERY ASSERTION, including a repeat of the same
+   * text. That is deliberately the OPPOSITE of `last_state_change`, which
+   * records a change and ignores repeats. Staleness asks when someone last
+   * vouched for these words; saying them again is vouching, and "still true"
+   * is new information about an old sentence.
+   *
+   * It is emphatically not `last_seen`. A heartbeat proves a process is alive
+   * and says nothing about whether its stated intent is current.
+   */
+  updateSummary(id: EntityId, summary: string | null): void {
+    const trimmed = summary?.trim() ?? '';
+
+    if (trimmed.length > SUMMARY_MAX_LENGTH) {
+      // Refused, not truncated. Truncation would publish a sentence the entity
+      // did not write, and the value of the field is that it is their words.
+      throw new ValidationError(
+        `Summary is ${trimmed.length} characters; the limit is ${SUMMARY_MAX_LENGTH}. ` +
+          'Shorten it rather than relying on truncation — a cut-off summary is ' +
+          'a claim the entity did not make.'
+      );
+    }
+
+    if (trimmed === '') {
+      this.db
+        .prepare('UPDATE entities SET summary = NULL, summary_set_at = NULL WHERE id = ?')
+        .run(id);
+      return;
+    }
+
+    this.db
+      .prepare(
+        `UPDATE entities SET summary = ?, summary_set_at = datetime('now') WHERE id = ?`
+      )
+      .run(trimmed, id);
+  }
+
+  /**
    * Recompute `queue_empty` from the queue FAM can actually see.
    *
    * An OPERATION, not a setter: the caller supplies no value, because a route
@@ -390,6 +435,8 @@ export class EntityRepository {
           ? null
           : Boolean(row.queue_empty),
       last_state_change: row.last_state_change ?? null,
+      summary: row.summary ?? null,
+      summary_set_at: row.summary_set_at ?? null,
       created_at: row.created_at,
       last_seen: row.last_seen,
     };

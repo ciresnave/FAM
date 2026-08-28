@@ -421,7 +421,13 @@ duplicate is a conflict now.
 
 ## Remaining
 
-### Phase 3 — Directory Scoping (in progress)
+### Phase 3 — Directory Scoping (DONE — heading was stale)
+
+All three items below are built and tested; the policy is recorded under
+"Directory Scoping (LOCKED policy)" in Completed above. Verified 2026-08-27:
+`scope: 'directory'` is handled in `/entities/list`, `getDirectoryForAccount`
+exists, and `/admin/api/directory` is registered and feeds the console.
+
 - `/entities/list scope: 'directory'`: caller sees own account's entities +
   entities actively granted to their account. `scope: 'all'` unchanged.
 - Repo method `getDirectoryForAccount(accountId)`.
@@ -791,9 +797,24 @@ is not automatically a yes for this one.
 whichever declaration moved, so it inherits whatever the other two decide.
 
 
+### Phase 5 — Federation (NOT STARTED, and absent from this file until now)
+
+Specified in `DESIGN.md` (Phase 5: Federation) and never given a ROADMAP
+section, so the one entirely-unbuilt phase was also the one this document did
+not mention. Nothing here has been designed against, scoped, or estimated.
+
+It is the largest outstanding item in the project by a wide margin, and every
+"pre-alpha, not ready to deploy" statement rests on it.
+
 ### Phase 6 — Test Backlog & Data-Model Fixes
-- Migration matrix: fresh → current, each older version → current.
-- Availability + directory scoping coverage.
+- Migration matrix: fresh → current, each older version → current. **PARTIAL.**
+  Covered as starting points: fresh, v1, v3, v5, v6. **Not covered: v2, v4, v7,
+  v8, v9, v10.** Every version added since the matrix was written has gone
+  untested as an upgrade origin, which is the direction that matters — the
+  rewind test found two real defects (migration 8 not re-appliable, migration 11
+  a bare ALTER) and only in the versions it happens to cover.
+- Availability + directory scoping coverage. **DONE** — `declaredState.test.ts`
+  and the directory-scoping tests under Completed.
 
 ### Phase 6b — Findings from operating claude-peers at scale
 

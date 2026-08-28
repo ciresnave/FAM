@@ -12,8 +12,14 @@ architecture and `ROADMAP.md` for phased status — ROADMAP.md is the source of
 truth for what is done and what is not.
 
 **Pre-alpha.** Runs end to end locally via `bun run bootstrap <email>`, but is
-not ready to deploy. Federation, key rotation and per-recipient channel
-delivery are unbuilt.
+not ready to deploy. **Federation is unbuilt** — see DESIGN.md Phase 5, which is
+the one phase with no ROADMAP section.
+
+This line previously also named key rotation and per-recipient channel delivery
+as unbuilt. Both shipped and ROADMAP has carried them as LOCKED for some time
+(`src/scripts/rotate-key.ts` and the keyring in `src/crypto/message-encryption.ts`;
+`message_deliveries` and migration 7). A stale "not built yet" is worse than a
+stale "done": it invites someone to build a second one.
 
 `bun run bootstrap` writes to the database directly and is deliberately NOT an
 HTTP route — an endpoint that mints account credentials is an authentication

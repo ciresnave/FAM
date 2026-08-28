@@ -5,6 +5,9 @@ import { QueueNotEmptyError, ValidationError } from '../../types/errors';
 
 /** Long enough for a sentence or two of intent; short enough to stay scannable. */
 export const SUMMARY_MAX_LENGTH = 500;
+
+/** Bound on the serialised context bag. Big enough for a handful of paths. */
+export const CONTEXT_MAX_LENGTH = 4000;
 import type { Entity, EntityId, AccountId, EntityType, EntityCapabilities } from '../../types';
 
 // ============================================================================
@@ -315,6 +318,91 @@ export class EntityRepository {
   }
 
   /**
+   * Set (or clear) this entity's adapter-populated context bag.
+   *
+   * OPAQUE TO THE CORE. A map of namespaced keys to strings; nothing here
+   * parses a value or knows what any key means. Keys must contain a namespace
+   * separator, because a bare `cwd` would be FAM claiming a concept of a
+   * working directory — which is exactly what does not belong in a federation
+   * protocol. `mcp.cwd` belongs to the MCP adapter and stays its business.
+   */
+  updateContext(id: EntityId, context: Record<string, string> | null): void {
+    if (context === null) {
+      this.db.prepare('UPDATE entities SET context = NULL WHERE id = ?').run(id);
+      return;
+    }
+
+    for (const [key, value] of Object.entries(context)) {
+      if (!key.includes('.') || key.startsWith('.') || key.endsWith('.')) {
+        throw new ValidationError(
+          `Context key "${key}" is not namespaced. Use "<adapter>.<key>", e.g. ` +
+            '"mcp.cwd". An un-namespaced key would make this a claim about a ' +
+            'concept FAM does not have.'
+        );
+      }
+      if (typeof value !== 'string') {
+        throw new ValidationError(
+          `Context value for "${key}" is ${typeof value}; only strings are stored. ` +
+            'The core compares these for equality and never interprets them.'
+        );
+      }
+    }
+
+    const encoded = JSON.stringify(context);
+    if (encoded.length > CONTEXT_MAX_LENGTH) {
+      throw new ValidationError(
+        `Context bag is ${encoded.length} bytes; the limit is ${CONTEXT_MAX_LENGTH}. ` +
+          'Refused rather than trimmed — a partial bag would collide on the keys ' +
+          'that survived and stay silent about the ones that did not.'
+      );
+    }
+
+    this.db.prepare('UPDATE entities SET context = ? WHERE id = ?').run(encoded, id);
+  }
+
+  /**
+   * Find context values shared by two or more entities in ONE account.
+   *
+   * Pure equality over opaque strings — this would report a collision on any
+   * key at all, which is the property that keeps filesystem knowledge out of
+   * the core.
+   *
+   * SCOPED TO ONE ACCOUNT deliberately. A collision between two of your own
+   * sessions is operationally useful; telling you that a stranger's session
+   * runs from the same path is a disclosure nobody asked for, and the harm this
+   * exists to fix was always same-operator.
+   */
+  findContextCollisions(accountId: AccountId): Array<{
+    key: string;
+    value: string;
+    entity_ids: EntityId[];
+  }> {
+    const rows = this.db
+      .prepare('SELECT id, context FROM entities WHERE account_id = ? AND context IS NOT NULL')
+      .all(accountId) as Array<{ id: string; context: string }>;
+
+    const seen = new Map<string, { key: string; value: string; entity_ids: string[] }>();
+
+    for (const row of rows) {
+      let bag: Record<string, string>;
+      try {
+        bag = JSON.parse(row.context);
+      } catch {
+        continue; // An unreadable bag is not a collision.
+      }
+      for (const [key, value] of Object.entries(bag)) {
+        if (typeof value !== 'string' || value === '') continue;
+        const composite = `${key} ${value}`;
+        const entry = seen.get(composite) ?? { key, value, entity_ids: [] };
+        entry.entity_ids.push(row.id);
+        seen.set(composite, entry);
+      }
+    }
+
+    return [...seen.values()].filter(e => e.entity_ids.length > 1);
+  }
+
+  /**
    * Set (or clear) this entity's free-text summary of what it is doing.
    *
    * `null` or whitespace clears it, and clears the stamp with it — a stamp
@@ -437,6 +525,16 @@ export class EntityRepository {
       last_state_change: row.last_state_change ?? null,
       summary: row.summary ?? null,
       summary_set_at: row.summary_set_at ?? null,
+      context: (() => {
+        if (!row.context) return null;
+        try {
+          return JSON.parse(row.context) as Record<string, string>;
+        } catch {
+          // A bag that will not parse is reported as absent rather than
+          // crashing every read of the entity.
+          return null;
+        }
+      })(),
       created_at: row.created_at,
       last_seen: row.last_seen,
     };

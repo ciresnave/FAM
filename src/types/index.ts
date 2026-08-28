@@ -90,6 +90,17 @@ export interface Entity {
    */
   summary_set_at: string | null;
 
+  /**
+   * Adapter-populated, namespaced, and OPAQUE to FAM.
+   *
+   * A map like `{"mcp.cwd": "..."}`. The core compares these strings for
+   * equality to detect collisions and never interprets one — it does not know
+   * which key means "working directory", and it must not: `cwd` and repo are
+   * framework-local concepts that do not belong in a federation protocol.
+   * Namespacing is what keeps that true.
+   */
+  context: Record<string, string> | null;
+
   created_at: string;
   last_seen: string | null;
 }

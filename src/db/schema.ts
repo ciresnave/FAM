@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -420,6 +420,25 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // true" is new information about an old sentence.
     addColumnIfMissing('entities', 'summary', 'TEXT'),
     addColumnIfMissing('entities', 'summary_set_at', 'TEXT'),
+  ],
+  13: [
+    // An adapter-populated context bag.
+    //
+    // THE MEASURED HARM: two sessions sharing one checkout, mutually invisible,
+    // both claiming authorship of the same three commits. The network held both
+    // `cwd` values throughout and had no way to say so; 9 of 18 sessions were
+    // sharing a checkout with at least one sibling.
+    //
+    // FAM CORRECTLY HAS NO cwd OR REPO CONCEPT — those do not belong in a
+    // federation protocol, and this must not smuggle them in. The column holds
+    // an OPAQUE JSON map of namespaced keys to strings. The core compares them
+    // for equality and never parses one: it would flag a collision on any key
+    // an adapter chose to publish, and it does not know which key means
+    // "working directory". Only the MCP adapter knows what `mcp.cwd` is.
+    //
+    // Keys must be namespaced precisely to keep the core ignorant. A bare `cwd`
+    // would be FAM asserting a concept it does not have.
+    addColumnIfMissing('entities', 'context', 'TEXT'),
   ],
   9: [
     // Browser sessions for the admin console.

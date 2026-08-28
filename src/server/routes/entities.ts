@@ -223,6 +223,35 @@ export function entityRoutes(
       },
     },
     
+    // POST /entities/context
+    // Publish this entity's adapter-populated context bag.
+    //
+    // Entity session required: it describes where this entity is running, and
+    // only it knows. FAM stores the map opaquely and compares values for
+    // equality; it never learns what a key means.
+    {
+      method: 'POST',
+      pattern: '/entities/context',
+      handler: async (req) => {
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { context } = body;
+
+        if (context !== null && (typeof context !== 'object' || Array.isArray(context))) {
+          return new Response(
+            JSON.stringify({ error: 'context must be an object of namespaced string keys, or null' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        ctx.entities.updateContext(entity_id, context ?? null);
+
+        return new Response(
+          JSON.stringify({ ok: true, context: ctx.entities.getById(entity_id)!.context }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
     // POST /entities/summary
     // Set or clear this entity's free-text statement of what it is doing.
     //

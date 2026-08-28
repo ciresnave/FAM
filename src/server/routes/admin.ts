@@ -381,12 +381,26 @@ export function adminRoutes(
           // the other is how a four-day-old statement reads as current.
           summary: entity.summary ?? null,
           summary_set_at: entity.summary_set_at ?? null,
+          // OWN entities only. Context describes where a session is running;
+          // publishing that to every account you have been granted to is a
+          // disclosure nobody asked for, and the harm it exists to fix was
+          // always same-operator.
+          context: entity.account_id === accountId ? entity.context ?? null : null,
           created_at: entity.created_at,
           relationship: entity.account_id === accountId ? 'owned' : 'granted',
         }));
 
+        // Two of your own sessions sharing a value — the same checkout, say —
+        // are mutually invisible without this. Surfaced beside the directory
+        // rather than left for a reader to notice by comparing rows.
+        const collisions = ctx.entities.findContextCollisions(accountId);
+
         return new Response(
-          JSON.stringify({ entities: annotated, total: annotated.length }),
+          JSON.stringify({
+            entities: annotated,
+            total: annotated.length,
+            context_collisions: collisions,
+          }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
       },

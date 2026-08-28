@@ -124,3 +124,19 @@ describe('summary and its staleness stamp are inseparable', () => {
     expect(body).toContain('ago(e.summary_set_at)');
   });
 });
+
+describe('context collisions are surfaced, not derivable', () => {
+  // A collision is a fact about a PAIR. Rendering it as a per-row field would
+  // make the reader reconstruct it by comparing rows — which is precisely what
+  // nobody did when two sessions shared a checkout and both claimed the same
+  // commits. It has to arrive as its own statement.
+  test('the directory response collisions are rendered', () => {
+    const body = html.slice(html.indexOf('<script>'), html.lastIndexOf('</script>'));
+    expect(body).toContain('context_collisions');
+    expect(body).toContain('collision-rows');
+  });
+
+  test('the banner element exists in the markup', () => {
+    expect(html).toContain('id="collisions"');
+  });
+});

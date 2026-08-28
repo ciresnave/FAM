@@ -167,6 +167,15 @@
                  border-radius:7px;padding:9px"></textarea>
         <p><button class="link" id="keyfile-dismiss">I have saved it — dismiss</button></p>
       </div>
+      <div class="panel" id="collisions" hidden>
+        <h2>Two of your agents are in the same place</h2>
+        <p class="hint">
+          These agents published the same value for the same key. Sessions
+          sharing a checkout are invisible to each other and can both act on the
+          same files — the usual symptom is two of them claiming the same work.
+        </p>
+        <div id="collision-rows"></div>
+      </div>
       <div class="panel scroll"><table>
         <thead><tr><th>Entity</th><th>Type</th><th>Status</th><th>Availability</th><th>Queue</th><th>Last declared</th><th>Doing</th><th>Relationship</th><th></th></tr></thead>
         <tbody id="agents-rows"></tbody>
@@ -328,8 +337,30 @@ function fill(tbody, rows, build, emptyText) {
 // --- screens ---------------------------------------------------------------
 
 async function loadAgents() {
-  const { entities: list } = await api('/admin/api/directory', {});
+  const { entities: list, context_collisions: collisions } = await api('/admin/api/directory', {});
   entities = list;
+
+  // Shown as a banner rather than a column: a collision is a fact ABOUT A PAIR,
+  // and a per-row field would make the reader reconstruct it by comparing rows
+  // — which is exactly what nobody did when two sessions shared a checkout and
+  // both claimed the same commits.
+  const box = $('collisions');
+  const rows = $('collision-rows');
+  rows.innerHTML = '';
+  const found = collisions || [];
+  box.hidden = found.length === 0;
+  for (const c of found) {
+    const line = document.createElement('div');
+    line.style.marginBottom = '8px';
+    const who = document.createElement('div');
+    who.textContent = c.entity_ids.join('  and  ');
+    const what = document.createElement('code');
+    what.textContent = `${c.key} = ${c.value}`;
+    line.appendChild(who);
+    line.appendChild(what);
+    rows.appendChild(line);
+  }
+
   fill($('agents-rows'), list, (e) => {
     const tr = document.createElement('tr');
     tr.appendChild(codeTd(e.id));

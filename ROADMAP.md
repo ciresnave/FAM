@@ -908,7 +908,31 @@ predecessor system, not speculative hardening. Ordered by measured impact.
   was blocked on work that had already shipped, and act on it. The fix moves the
   discount from something a reader must remember to something they cannot avoid
   seeing.
-- **Adapter-populated context bag for framework-local identity.** FAM correctly
+- **Adapter-populated context bag. DONE** (migration v13). `entities.context`
+  holds an OPAQUE map of namespaced keys to strings; `POST /entities/context`
+  publishes it, the MCP adapter fills `mcp.cwd` and `mcp.git_root` automatically
+  on connect, and the console surfaces collisions as a banner.
+  - **The core stays ignorant, which was the constraint.** It compares strings
+    for equality and never parses one — it would flag a collision on
+    `weird.tenant_slug` just as readily, and there is a test asserting exactly
+    that. Keys MUST be namespaced: a bare `cwd` would be FAM claiming a concept
+    of a working directory, which is what does not belong in a federation
+    protocol.
+  - **`mcp.git_root` as well as `mcp.cwd`**, because two sessions in different
+    subdirectories of one repository share a checkout and would not collide on
+    cwd alone — which is the case that caused the harm.
+  - **Own-account only.** A collision between two of your sessions is useful;
+    telling you a stranger's session runs from the same path is a disclosure
+    nobody asked for. Tested with a foreign entity deliberately sharing a value
+    and not being reported.
+  - **Rendered as a banner, not a column.** A collision is a fact about a PAIR;
+    a per-row field would make the reader reconstruct it by comparing rows,
+    which is exactly what nobody did when two sessions shared a checkout and
+    both claimed the same three commits.
+  - Publishing is best-effort at connect: a session that cannot report where it
+    lives is still a usable session.
+
+- ~~**Adapter-populated context bag for framework-local identity.**~~ FAM correctly
   has no `cwd`/repo concept — those do not belong in a federation protocol — but
   dropping them cost collision detection that claude-peers had via `from_cwd`.
   Observed harm: two sessions sharing one checkout, mutually invisible, both

@@ -294,6 +294,25 @@ export class FamClient {
   }
   
   /**
+   * Publish this session's context bag.
+   *
+   * Namespaced under `mcp.` because these are framework-local facts — FAM has
+   * no concept of a working directory and must not acquire one. The server
+   * stores the map opaquely and compares values for equality; only this adapter
+   * knows what the keys mean.
+   */
+  async setContext(context: Record<string, string> | null): Promise<unknown> {
+    if (!this.entityId || !this.sessionId) {
+      throw new Error('Not authenticated');
+    }
+    return this.request('/entities/context', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      context,
+    });
+  }
+
+  /**
    * Set or clear your free-text summary of what you are currently doing.
    *
    * This is what makes you routable without anyone broadcasting: name and

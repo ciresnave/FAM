@@ -141,6 +141,27 @@ function describeDelivery(
   }
 }
 
+/**
+ * The git root of the working directory, or null when there is not one.
+ *
+ * Two sessions in the same repository but different subdirectories share a
+ * checkout and would NOT collide on cwd alone — the root is what makes them
+ * visible to each other.
+ */
+async function resolveGitRoot(): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(['git', 'rev-parse', '--show-toplevel'], {
+      stdout: 'pipe',
+      stderr: 'ignore',
+    });
+    const out = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+    return proc.exitCode === 0 && out ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   // 1. Load credentials
   const credentials = await loadCredentials();
@@ -198,6 +219,28 @@ async function main() {
   log(`Authenticated. Session: ${authResponse.session_id}`);
   log(`Undelivered messages: ${authResponse.undelivered_messages?.length ?? 0}`);
   
+  // Publish where this session is running.
+  //
+  // THE HARM THIS ADDRESSES: two sessions sharing one checkout, mutually
+  // invisible, both claiming authorship of the same three commits. The network
+  // held both cwd values the whole time and had no way to say so.
+  //
+  // Populated by the ADAPTER and namespaced under `mcp.`, because cwd and repo
+  // are framework-local concepts that do not belong in the protocol. FAM stores
+  // the map opaquely and flags equal values; it never learns what a key means.
+  //
+  // Best-effort: a session that cannot report where it lives is still a usable
+  // session, so a failure here is logged rather than fatal.
+  try {
+    const bag: Record<string, string> = { 'mcp.cwd': process.cwd() };
+    const gitRoot = await resolveGitRoot();
+    if (gitRoot) bag['mcp.git_root'] = gitRoot;
+    await client.setContext(bag);
+    log(`Context published: ${Object.keys(bag).join(', ')}`);
+  } catch (e) {
+    log(`Context not published (continuing): ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   // Set credentials for re-authentication on reconnect
   client.setAuthCredentials(publicKey, async (data: Uint8Array) => {
     return await sign(data, privateKeyBase64);

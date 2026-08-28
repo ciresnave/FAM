@@ -94,8 +94,30 @@ export interface AuthenticateResponse {
   }>;
 }
 
+export interface DeliveryReport {
+  /**
+   * What became of the message at the moment it was sent.
+   *
+   *   pushed  -- written to a live socket; silence afterwards is theirs
+   *   paused  -- recipient DECLARED unavailable; queued deliberately
+   *   offline -- no connection; queued, seen on reconnect
+   *
+   * `paused` is honest-broadcast, not enforced truth: it reports what the
+   * recipient said about itself, not a promise about what it will do.
+   */
+  outcome: 'pushed' | 'paused' | 'offline';
+  recipient: {
+    status: string;
+    availability: string;
+    queue_empty: boolean | null;
+    last_state_change: string | null;
+  };
+  declared_by_recipient: boolean;
+}
+
 export interface SendMessageResponse {
   message_id: number;
+  delivery?: DeliveryReport;
 }
 
 // ============================================================================

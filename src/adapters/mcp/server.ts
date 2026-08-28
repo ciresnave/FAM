@@ -99,6 +99,48 @@ async function decryptEntityKey(
 // MCP Server
 // ============================================================================
 
+/**
+ * Say what actually happened, in words an agent will act on correctly.
+ *
+ * "Message sent" was the whole problem: it read identically for a live
+ * recipient, one that had declared itself unavailable, and one offline for a
+ * week. An agent seeing three identical successes concludes silence is a
+ * choice, and waits on someone who never received the message.
+ */
+function describeDelivery(
+  target: string,
+  result: {
+    message_id: number;
+    delivery?: { outcome: string; recipient?: { queue_empty: boolean | null } };
+  }
+): string {
+  const id = `ID: ${result.message_id}`;
+  const d = result.delivery;
+  if (!d) {
+    return `Message stored for ${target} (${id}). This server does not report delivery state.`;
+  }
+
+  const queue = d.recipient?.queue_empty === false ? ' They have declared work pending.' : '';
+
+  switch (d.outcome) {
+    case 'pushed':
+      return `DELIVERED to ${target} (${id}). It reached them; silence from here is theirs.${queue}`;
+    case 'paused':
+      return (
+        `QUEUED for ${target} (${id}). They have declared themselves unavailable, so this was ` +
+        `held deliberately and they will see it when they resume. DO NOT read silence as a ` +
+        `reply — they have not received it yet.${queue}`
+      );
+    case 'offline':
+      return (
+        `QUEUED for ${target} (${id}). They are not connected; they will see it on reconnect. ` +
+        `DO NOT read silence as a reply — they have not received it yet.${queue}`
+      );
+    default:
+      return `Message stored for ${target} (${id}), delivery state "${d.outcome}".`;
+  }
+}
+
 async function main() {
   // 1. Load credentials
   const credentials = await loadCredentials();
@@ -184,6 +226,9 @@ Available tools:
 - fam_list_channel_members: See who's in a channel
 - fam_get_history: Get message history
 - fam_set_status: Update your status (online, away, busy)
+- fam_send_message: The result says whether the message was DELIVERED or merely
+  QUEUED. Read it. A queued message has not been seen, so silence from that peer
+  is not an answer and waiting on one is a mistake.
 - fam_set_availability: Pause/resume incoming messages (available/unavailable)
 - fam_set_queue_state: Declare whether you have work pending. Nothing else can
   tell — being alive is not the same as being busy. Declare false when you take
@@ -237,12 +282,12 @@ When you start, proactively list entities and channels to understand who's avail
           if (to_entity) {
             const result = await client.sendDirectMessage(to_entity, text);
             return {
-              content: [{ type: 'text' as const, text: `Message sent to ${to_entity} (ID: ${result.message_id})` }],
+              content: [{ type: 'text' as const, text: describeDelivery(to_entity, result) }],
             };
           } else if (channel_id) {
             const result = await client.sendChannelMessage(channel_id, text);
             return {
-              content: [{ type: 'text' as const, text: `Message sent to channel ${channel_id} (ID: ${result.message_id})` }],
+              content: [{ type: 'text' as const, text: describeDelivery(`channel ${channel_id}`, result) }],
             };
           } else {
             return {

@@ -65,7 +65,7 @@ describe('MessageSendService', () => {
   // -- Direct messages -------------------------------------------------------
 
   test('persists and pushes a direct message', async () => {
-    const message = await service.sendDirectMessage(SENDER, RECEIVER, 'hello dm');
+    const message = (await service.sendDirectMessage(SENDER, RECEIVER, 'hello dm')).message;
 
     expect(message.id).toBeGreaterThan(0);
     expect(message.from_entity).toBe(SENDER);
@@ -85,7 +85,7 @@ describe('MessageSendService', () => {
   });
 
   test('trims whitespace from message text', async () => {
-    const message = await service.sendDirectMessage(SENDER, RECEIVER, '  padded  ');
+    const message = (await service.sendDirectMessage(SENDER, RECEIVER, '  padded  ')).message;
     expect(message.text).toBe('padded');
     expect(wsManager.pushes[0]!.message.text).toBe('padded');
   });
@@ -146,7 +146,7 @@ describe('MessageSendService', () => {
     ctx.channels.addMember(channel.id, RECEIVER);
     ctx.channels.addMember(channel.id, OUTSIDER);
 
-    const message = await service.sendChannelMessage(SENDER, channel.id, 'hello room');
+    const message = (await service.sendChannelMessage(SENDER, channel.id, 'hello room')).message;
 
     expect(message.id).toBeGreaterThan(0);
     expect(message.channel_id).toBe(channel.id);
@@ -222,7 +222,7 @@ describe('MessageSendService', () => {
 
     test('active grant allows the cross-account DM', async () => {
       ctx.grants.create(ACCOUNT, FOREIGN_ACCOUNT, RECEIVER);
-      const message = await service.sendDirectMessage(FOREIGN_SENDER, RECEIVER, 'hello across');
+      const message = (await service.sendDirectMessage(FOREIGN_SENDER, RECEIVER, 'hello across')).message;
       expect(message.id).toBeGreaterThan(0);
       expect(wsManager.pushes.length).toBe(1);
       expect(wsManager.pushes[0]!.entityId).toBe(RECEIVER);
@@ -311,7 +311,7 @@ describe('MessageSendService', () => {
         action: 'allow',
       });
 
-      const message = await service.sendDirectMessage(FOREIGN_SENDER, RECEIVER, 'still allowed');
+      const message = (await service.sendDirectMessage(FOREIGN_SENDER, RECEIVER, 'still allowed')).message;
       expect(message.id).toBeGreaterThan(0);
     });
 
@@ -332,7 +332,7 @@ describe('MessageSendService', () => {
         expect(e).toBeInstanceOf(ForbiddenError);
       }
       // OUTSIDER (same account) unaffected
-      const ok = await service.sendDirectMessage(OUTSIDER, RECEIVER, 'still ok');
+      const ok = (await service.sendDirectMessage(OUTSIDER, RECEIVER, 'still ok')).message;
       expect(ok.id).toBeGreaterThan(0);
     });
 
@@ -342,7 +342,7 @@ describe('MessageSendService', () => {
       ctx.channels.addMember(channel.id, RECEIVER);
       ctx.channels.addMember(channel.id, FOREIGN_MEMBER);
 
-      const message = await service.sendChannelMessage(SENDER, channel.id, 'hello room');
+      const message = (await service.sendChannelMessage(SENDER, channel.id, 'hello room')).message;
       expect(message.id).toBeGreaterThan(0);
 
       // Both members received the push
@@ -358,7 +358,7 @@ describe('MessageSendService', () => {
         action: 'deny',
       });
 
-      const message2 = await service.sendChannelMessage(SENDER, channel.id, 'again');
+      const message2 = (await service.sendChannelMessage(SENDER, channel.id, 'again')).message;
       expect(message2.id).toBeGreaterThan(0); // still persisted — channel sends are not blocked
       expect(wsManager.pushes.map(p => p.entityId)).toEqual([FOREIGN_MEMBER]); // RECEIVER filtered
     });

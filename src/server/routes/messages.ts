@@ -63,12 +63,14 @@ export function messageRoutes(
         
         // All validation, authorization, persistence, and push live in the service.
         // Errors (FamError subclasses) bubble to the HTTP error handler.
-        const message = channel_id
+        const { message, delivery } = channel_id
           ? await sendService.sendChannelMessage(entity_id, channel_id, text)
           : await sendService.sendDirectMessage(entity_id, to_entity, text);
-        
+
+        // The delivery block is the point: 201 alone said "stored" and was read
+        // as "delivered". Any outcome that is not delivery must be legible.
         return new Response(
-          JSON.stringify({ message_id: message.id }),
+          JSON.stringify({ message_id: message.id, delivery }),
           { status: 201, headers: { 'Content-Type': 'application/json' } }
         );
       },

@@ -28,6 +28,14 @@ interface ConnectedEntity {
 // WebSocket Manager
 // ============================================================================
 
+/**
+ * What became of a push, at the moment it was attempted.
+ *
+ * `paused` is HONEST-BROADCAST, not enforced truth: it reports what the
+ * recipient declared about itself, not a guarantee about what it will do.
+ */
+export type PushOutcome = 'pushed' | 'paused' | 'offline';
+
 export class WebSocketManager {
   private connections = new Map<string, ConnectedEntity>(); // sessionId -> connection
   private entityConnections = new Map<EntityId, Set<string>>(); // entityId -> sessionIds
@@ -214,26 +222,41 @@ export class WebSocketManager {
    * messages, system notifications) since it is the user's "pause incoming"
    * intent.
    */
-  pushToEntity(entityId: EntityId, message: WebSocketMessage): void {
+  pushToEntity(entityId: EntityId, message: WebSocketMessage): PushOutcome {
+    // Returns what actually happened rather than discarding it.
+    //
+    // These three branches already existed and the answer was thrown away, so
+    // a send to a week-offline entity was indistinguishable from a delivery.
+    // The caller reports this to the sender: any outcome that is not delivery
+    // has to be legible, or "never received it" reads as "chose not to answer".
+    //
+    // Determined HERE, at the push, not re-derived by the caller afterwards —
+    // re-querying connection state races with a disconnect and can report a
+    // delivery that did not happen.
     const sessionIds = this.entityConnections.get(entityId);
     if (!sessionIds || sessionIds.size === 0) {
-      // Entity is offline - message will be queued in database
-      return;
+      // Offline: queued in the database, seen on reconnect.
+      return 'offline';
     }
 
-    // Suppress pushes to unavailable entities (silent queue)
+    // Declared unavailable: queued deliberately, and the queue is the point.
     const entity = this.ctx.entities.getById(entityId);
     if (!entity || entity.availability === 'unavailable') {
-      return;
+      return 'paused';
     }
 
-    // Send to all connections for this entity
+    let wrote = false;
     for (const sessionId of sessionIds) {
       const connection = this.connections.get(sessionId);
       if (connection) {
         this.send(connection.ws, message);
+        wrote = true;
       }
     }
+
+    // A registered entity with no live connection object is offline in every
+    // sense the sender cares about, whatever the bookkeeping says.
+    return wrote ? 'pushed' : 'offline';
   }
   
   /**
@@ -374,10 +397,13 @@ export class WebSocketManager {
         ? await this.sendService.sendDirectMessage(entityId, message.to, message.text.trim())
         : await this.sendService.sendChannelMessage(entityId, message.channel!, message.text.trim());
       
-      // Send acknowledgment with actual message ID
+      // Acknowledge with the message id AND what became of it. A bare ack over
+      // the socket had the same defect as the 201 over HTTP: it confirmed
+      // storage and was read as delivery.
       this.send(ws, {
         type: 'ack',
-        message_id: sent.id,
+        message_id: sent.message.id,
+        delivery: sent.delivery,
       });
     } catch (e) {
       logger.error('Failed to send message', { entityId, error: e });

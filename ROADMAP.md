@@ -822,7 +822,26 @@ Derived from four days of field data across 17-18 concurrent agents (portfolio
 PM session, 2026-08-19). These are failure modes observed in production on the
 predecessor system, not speculative hardening. Ordered by measured impact.
 
-- **Delivery state in the send response.** Highest value of the four. Sending
+- **Delivery state in the send response. DONE.** `/messages/send` and the
+  WebSocket ack now carry a `delivery` block: `outcome` is `pushed`, `paused` or
+  `offline`, alongside the recipient's status, availability and declared queue
+  state. The MCP adapter renders it in words an agent acts on — "DELIVERED …
+  silence from here is theirs" versus "QUEUED … DO NOT read silence as a reply".
+  - **The outcome is captured AT THE PUSH, not re-derived.** `pushToEntity`
+    already had all three branches and discarded the answer; re-querying
+    connection state afterwards races with a disconnect and can report a
+    delivery that did not happen.
+  - Channel sends report the **weakest** member outcome, because "pushed" would
+    overstate a fan-out where anyone was offline. Per-member truth is in
+    `message_deliveries`.
+  - The caveat survives in the field name `declared_by_recipient`: `paused` is
+    honest-broadcast, not enforced truth.
+  - **This closes the half left open by the retention fix.** That stopped the
+    system destroying undelivered mail; this stops it lying about the mail's
+    fate. Same rule, both directions: *any outcome that is not delivery must be
+    legible to the sender.*
+
+- ~~**Delivery state in the send response.**~~ Highest value of the four. Sending
   to an offline or `unavailable` entity currently returns `201 + message_id`:
   persisted, queued, and indistinguishable from delivered. The server already
   knows the answer and does not tell the sender. Field data: of 12 peers pinged

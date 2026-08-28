@@ -8,6 +8,7 @@
 
 import type { DatabaseContext } from '../../db/transaction';
 import type { WebSocketManager } from '../websocket';
+import type { PushOutcome } from '../websocket';
 import type { Message, EntityId, ChannelId } from '../../types';
 import { NotFoundError, ForbiddenError, InsufficientCapabilitiesError, EntityNotInChannelError } from '../../types/errors';
 import { validateEntityId, validateChannelId, validateMessageText } from '../../types/validation';
@@ -16,6 +17,36 @@ import type { PermissionChecker } from './permissionChecker';
 // ============================================================================
 // Message Send Service
 // ============================================================================
+
+/**
+ * What the sender is told beyond "it was stored".
+ *
+ * The recipient block is state the RECIPIENT declared or the connection
+ * revealed. The sender is already permitted to message this entity and the
+ * directory already exposes the same fields for entities it can see, so this
+ * discloses nothing new — it exists so the sender can tell a busy peer from a
+ * paused one from an absent one.
+ */
+export interface DeliveryReport {
+  outcome: PushOutcome;
+  recipient: {
+    status: string;
+    availability: string;
+    queue_empty: boolean | null;
+    last_state_change: string | null;
+  };
+  /**
+   * True for `paused`: the recipient DECLARED unavailable. Named to keep the
+   * caveat attached to the value — availability is honest-broadcast, not
+   * enforced truth, and a caller must not read it as a promise.
+   */
+  declared_by_recipient: boolean;
+}
+
+export interface SendResult {
+  message: Message;
+  delivery: DeliveryReport;
+}
 
 export class MessageSendService {
   constructor(
@@ -34,7 +65,7 @@ export class MessageSendService {
     fromEntityId: EntityId,
     toEntityId: EntityId,
     text: string
-  ): Promise<Message> {
+  ): Promise<SendResult> {
     validateEntityId(fromEntityId);
     validateEntityId(toEntityId);
     validateMessageText(text);
@@ -65,8 +96,8 @@ export class MessageSendService {
       return this.ctx.messages.insertDirectMessage(fromEntityId, toEntityId, storedText, trimmed);
     })();
 
-    // Push to recipient if online
-    this.wsManager.pushToEntity(toEntityId, {
+    // Push to recipient if online, and KEEP the answer.
+    const outcome = this.wsManager.pushToEntity(toEntityId, {
       type: 'message',
       from: fromEntityId,
       channel: null,
@@ -76,7 +107,23 @@ export class MessageSendService {
       message_id: message.id,
     });
 
-    return message;
+    // Read the recipient AFTER the push, so the reported state is the state
+    // the outcome was decided against rather than a snapshot from before it.
+    const after = this.ctx.entities.getById(toEntityId);
+
+    return {
+      message,
+      delivery: {
+        outcome,
+        recipient: {
+          status: after?.status ?? 'offline',
+          availability: after?.availability ?? 'available',
+          queue_empty: after?.queue_empty ?? null,
+          last_state_change: after?.last_state_change ?? null,
+        },
+        declared_by_recipient: outcome === 'paused',
+      },
+    };
   }
 
   /**
@@ -91,7 +138,7 @@ export class MessageSendService {
     fromEntityId: EntityId,
     channelId: ChannelId,
     text: string
-  ): Promise<Message> {
+  ): Promise<SendResult> {
     validateEntityId(fromEntityId);
     validateChannelId(channelId);
     validateMessageText(text);
@@ -135,6 +182,7 @@ export class MessageSendService {
     };
 
     const members = this.ctx.channels.getMembers(channelId);
+    const outcomes: PushOutcome[] = [];
     for (const member of members) {
       if (member.entity_id === fromEntityId) continue;
 
@@ -143,10 +191,33 @@ export class MessageSendService {
 
       if (this.permissionChecker.isDeniedByRules(sender, memberEntity)) continue;
 
-      this.wsManager.pushToEntity(member.entity_id, pushMessage);
+      const memberOutcome = this.wsManager.pushToEntity(member.entity_id, pushMessage);
+      outcomes.push(memberOutcome);
     }
 
-    return message;
+    // A channel send has one outcome per member, so the single-recipient
+    // vocabulary does not fit. Reported as the WEAKEST outcome any member got:
+    // if anybody is offline or paused, "pushed" would overstate what happened
+    // for the channel as a whole. The per-member detail lives in
+    // message_deliveries, which is where a caller that needs it should look.
+    const weakest: PushOutcome =
+      outcomes.includes('offline') ? 'offline'
+      : outcomes.includes('paused') ? 'paused'
+      : 'pushed';
+
+    return {
+      message,
+      delivery: {
+        outcome: outcomes.length === 0 ? 'offline' : weakest,
+        recipient: {
+          status: `${outcomes.filter(o => o === 'pushed').length}/${outcomes.length} pushed`,
+          availability: 'n/a (channel)',
+          queue_empty: null,
+          last_state_change: null,
+        },
+        declared_by_recipient: false,
+      },
+    };
   }
 
   // --------------------------------------------------------------------------

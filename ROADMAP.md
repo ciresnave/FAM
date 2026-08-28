@@ -807,7 +807,25 @@ It is the largest outstanding item in the project by a wide margin, and every
 "pre-alpha, not ready to deploy" statement rests on it.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
-- Migration matrix: fresh → current, each older version → current. **PARTIAL.**
+- **Migration matrix: DONE, and it maintains itself.** `migrationMatrix.test.ts`
+  builds each origin by running the REAL migrations 1..N via `migrateTo`, then
+  upgrades to current. A version-N database is by construction what a version-N
+  database is, and the loop is bounded by `CURRENT_SCHEMA_VERSION` — **so adding
+  a migration extends the coverage instead of the untested list. There is no
+  list to fall behind.**
+  - **This also closes the hand-written-fixture class**, which had bitten twice
+    (migrations 8 and 10), both times by a fixture stamping version N while
+    lacking objects version N would have. Fixing the instance had left the class
+    both times.
+  - **It found four real defects immediately: migrations 2, 3, 5 and 6 were NOT
+    re-appliable** — bare `ALTER TABLE ADD COLUMN` and `CREATE INDEX` without
+    `IF NOT EXISTS`. Everything from 7 onward was, because that is when the
+    discipline started, so the invariant the codebase states was only half true.
+    Not a correctness bug (each migration runs in a transaction that rolls back)
+    but an invariant half-held is worse than one not claimed. All are idempotent
+    now, verified by mutation: reverting migration 12 to a bare ALTER reddens
+    exactly the re-appliability test.
+  - The old note said: covered as origins fresh, v1, v3, v5, v6 — **PARTIAL.**
   Covered as starting points: fresh, v1, v3, v5, v6. **Not covered: v2, v4, v7,
   v8, v9, v10.** Every version added since the matrix was written has gone
   untested as an upgrade origin, which is the direction that matters — the

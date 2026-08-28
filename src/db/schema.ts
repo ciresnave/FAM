@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -189,9 +189,9 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // Per-row format version tracking (formats are also self-describing via
     // their version field; this column records the row-level format for
     // future evolution, e.g. mixed envelope formats)
-    'ALTER TABLE entities ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1',
-    'ALTER TABLE channels ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1',
-    'ALTER TABLE messages ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1',
+    addColumnIfMissing('entities', 'format_version', 'INTEGER NOT NULL DEFAULT 1'),
+    addColumnIfMissing('channels', 'format_version', 'INTEGER NOT NULL DEFAULT 1'),
+    addColumnIfMissing('messages', 'format_version', 'INTEGER NOT NULL DEFAULT 1'),
   ],
   3: [
     // Cross-account grants: default-deny messaging; an active grant from the
@@ -209,9 +209,9 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
       revoked_at TEXT,
       UNIQUE(grantor_account_id, grantee_account_id, entity_id)
     )`,
-    'CREATE INDEX idx_grants_grantor ON grants(grantor_account_id)',
-    'CREATE INDEX idx_grants_grantee ON grants(grantee_account_id)',
-    'CREATE INDEX idx_grants_entity ON grants(entity_id, status)',
+    'CREATE INDEX IF NOT EXISTS idx_grants_grantor ON grants(grantor_account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_grants_grantee ON grants(grantee_account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_grants_entity ON grants(entity_id, status)',
     // Permission matrix: per-account allow/deny rules protecting the account's
     // entities from specific entities or entire accounts
     `CREATE TABLE IF NOT EXISTS permissions (
@@ -226,9 +226,9 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
       created_at TEXT DEFAULT (datetime('now')),
       created_by_entity TEXT REFERENCES entities(id) ON DELETE SET NULL
     )`,
-    'CREATE INDEX idx_permissions_account ON permissions(account_id)',
-    'CREATE INDEX idx_permissions_target ON permissions(target_type, target_entity_id)',
-    'CREATE INDEX idx_permissions_source ON permissions(source_type, source_entity_id, source_account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_account ON permissions(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_target ON permissions(target_type, target_entity_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_source ON permissions(source_type, source_entity_id, source_account_id)',
     // Channel bans retired in favor of the permission matrix (channel
     // moderation is kick + set-role; cross-account blocking is account-scoped)
     'DROP INDEX IF EXISTS idx_channel_bans_entity',
@@ -267,17 +267,17 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
      FROM permissions`,
     'DROP TABLE permissions',
     'ALTER TABLE permissions_v4 RENAME TO permissions',
-    'CREATE INDEX idx_permissions_account ON permissions(account_id)',
-    'CREATE INDEX idx_permissions_target ON permissions(target_type, target_entity_id)',
-    'CREATE INDEX idx_permissions_source ON permissions(source_type, source_entity_id, source_account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_account ON permissions(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_target ON permissions(target_type, target_entity_id)',
+    'CREATE INDEX IF NOT EXISTS idx_permissions_source ON permissions(source_type, source_entity_id, source_account_id)',
   ],
   5: [
     // Availability = user intent (available/unavailable), separate from the
     // connection-derived `status`. Unavailable entities have incoming pushes
     // suppressed (messages queue silently); flipping back to available pushes
     // the queued backlog immediately.
-    `ALTER TABLE entities ADD COLUMN availability TEXT NOT NULL DEFAULT 'available'
-      CHECK(availability IN ('available', 'unavailable'))`,
+    addColumnIfMissing('entities', 'availability',
+        `TEXT NOT NULL DEFAULT 'available' CHECK(availability IN ('available', 'unavailable'))`),
   ],
   6: [
     // Bind each account to the identity provider that created it.
@@ -296,11 +296,11 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // Nullable because pre-v6 rows predate the binding. They adopt a provider
     // on the next successful login (trust-on-first-use); there are no such
     // rows in any deployed database today.
-    `ALTER TABLE accounts ADD COLUMN provider TEXT
-      CHECK(provider IS NULL OR provider IN ('google', 'github'))`,
-    'ALTER TABLE accounts ADD COLUMN provider_account_id TEXT',
+    addColumnIfMissing('accounts', 'provider',
+        `TEXT CHECK(provider IS NULL OR provider IN ('google', 'github'))`),
+    addColumnIfMissing('accounts', 'provider_account_id', 'TEXT'),
     // One provider identity maps to exactly one account.
-    `CREATE UNIQUE INDEX idx_accounts_provider_identity
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_provider_identity
        ON accounts(provider, provider_account_id)
        WHERE provider IS NOT NULL AND provider_account_id IS NOT NULL`,
   ],
@@ -552,6 +552,43 @@ export function initializeDatabase(db: Database): void {
   // Apply pending migrations
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
     migrate(db, currentVersion, CURRENT_SCHEMA_VERSION);
+  }
+}
+
+/**
+ * Bring a fresh database up to exactly `targetVersion` by running the REAL
+ * migrations in order.
+ *
+ * Exists so the migration matrix can build its own origins instead of
+ * hand-writing them. Hand-written fixtures failed twice in one day, both times
+ * by stamping version N while physically lacking objects version N would have
+ * — and the fix each time added only the one table that migration happened to
+ * need, leaving the class intact.
+ *
+ * A database built this way IS a version-N database by construction, and the
+ * matrix that uses it is bounded by CURRENT_SCHEMA_VERSION, so adding a
+ * migration extends the coverage rather than the untested-origins list. There
+ * is no list to fall behind.
+ */
+export function migrateTo(db: Database, targetVersion: number): void {
+  if (targetVersion < 1 || targetVersion > CURRENT_SCHEMA_VERSION) {
+    throw new Error(
+      `migrateTo: ${targetVersion} is outside 1..${CURRENT_SCHEMA_VERSION}`
+    );
+  }
+
+  db.run('PRAGMA foreign_keys = ON');
+  db.exec(SCHEMA_SQL);
+
+  if (getSchemaVersion(db) === 0) {
+    db.run(
+      "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (1, datetime('now'))"
+    );
+  }
+
+  const from = getSchemaVersion(db);
+  if (from < targetVersion) {
+    migrate(db, from, targetVersion);
   }
 }
 

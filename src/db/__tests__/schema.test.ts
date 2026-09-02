@@ -3,14 +3,14 @@ import { Database } from 'bun:sqlite';
 import { initializeDatabase } from '../schema';
 
 describe('Schema Migrations', () => {
-  test('fresh database initializes at current schema version with v2-v13 objects', () => {
+  test('fresh database initializes at current schema version with v2-v14 objects', () => {
     const db = new Database(':memory:');
     initializeDatabase(db);
 
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(13);
+    expect(version.version).toBe(14);
 
     // v2 columns exist on all three tables
     for (const table of ['entities', 'channels', 'messages']) {
@@ -107,7 +107,7 @@ describe('Schema Migrations', () => {
     const version = db1
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(13);
+    expect(version.version).toBe(14);
 
     // v2 columns now exist and pre-existing data survived
     const cols = db1
@@ -211,7 +211,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(13);
+    expect(version.version).toBe(14);
 
     // The ambiguous row survived, normalized: target_entity_id and
     // source_entity_id stripped per the rule shape
@@ -283,7 +283,7 @@ describe('Schema Migrations', () => {
     const version = db
       .query('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number };
-    expect(version.version).toBe(13);
+    expect(version.version).toBe(14);
 
     const cols = db.query('PRAGMA table_info(accounts)').all() as { name: string }[];
     const names = cols.map((c) => c.name);
@@ -357,7 +357,7 @@ describe('Schema Migrations', () => {
     initializeDatabase(db);
 
     const version = db.query('SELECT MAX(version) as version FROM schema_version').get() as { version: number };
-    expect(version.version).toBe(13);
+    expect(version.version).toBe(14);
 
     // DM: exactly one recipient, and the old flag is preserved.
     const dm = db

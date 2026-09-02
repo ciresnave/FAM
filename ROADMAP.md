@@ -914,7 +914,34 @@ below.**
   instance does not need this feature — it needs CireSnave to tell vulkane
   directly.** The feature stops it recurring.
 
-**7.3 — Task ownership.** An assignment object whose owner is an entity, so
+**7.3 — Task ownership. DONE** (migration v14). `tasks` table, `/tasks/*` routes,
+four MCP tools, and an "unattended" banner in the console.
+- **`owner_entity_id` is `ON DELETE SET NULL`, deliberately and not by default.**
+  Deleting an entity must ORPHAN the work, not destroy it — destroying work when
+  its owner is removed is the exact failure this exists to prevent, and a CASCADE
+  would have implemented it. Mutation-verified: switching to CASCADE reddens
+  exactly the test that says so.
+- **Unattended is DERIVED at read time, never stored.** A flag goes stale the
+  moment an owner reconnects, the same reason context collisions are computed.
+- **The two causes are kept apart: `unowned` and `owner_offline`.** Collapsing
+  them into one "orphaned" label makes the list say less than the query knows —
+  "assign it to somebody" and "re-queue it" are different actions.
+- **The age is reported, not judged.** An owner offline four minutes and one
+  offline four days are both "not connected"; only the reader knows which
+  matters, so no threshold is baked in.
+- **Closed work is never unattended.** Padding the list with things nobody can
+  act on trains a reader to skim it, and a skimmed list is how a real orphan is
+  missed.
+- **Assignment reuses `canDirectMessage`** rather than inventing a second
+  authority — with the limit stated: an assignment is a RECORD that somebody owns
+  something, not a command that compels them. If it ever becomes compelling
+  (auto-dispatch, forced re-queue) it needs its own authority, because "may talk
+  to" and "may direct" stop being the same question then.
+- The MCP tool text tells an agent that is stopping to **assign the task to null
+  rather than leaving it owned** — an unowned task is visible; a task owned by a
+  process that is gone only looks assigned.
+
+**7.3 — Task ownership (original scope).** An assignment object whose owner is an entity, so
 "owner not currently connected" is a query rather than something a coordinator
 must remember. **Nothing in FAM answers this today**: `queue_empty`,
 `last_state_change` and session liveness all answer *"is this agent stalled"*, and

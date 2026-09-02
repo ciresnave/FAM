@@ -140,3 +140,19 @@ describe('context collisions are surfaced, not derivable', () => {
     expect(html).toContain('id="collisions"');
   });
 });
+
+describe('unattended work distinguishes its two causes', () => {
+  // "Re-queue it" and "assign it to somebody" are different actions. A single
+  // "orphaned" label would make the list say less than the query knows, which
+  // is the whole reason the reason field exists.
+  test('both reasons are rendered', () => {
+    const body = html.slice(html.indexOf('<script>'), html.lastIndexOf('</script>'));
+    expect(body).toContain('unowned');
+    expect(body).toContain('owner offline');
+    expect(body).toContain('/admin/api/tasks/unattended');
+  });
+
+  test('the banner element exists', () => {
+    expect(html).toContain('id="unattended"');
+  });
+});

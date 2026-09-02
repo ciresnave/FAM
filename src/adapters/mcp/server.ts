@@ -273,6 +273,13 @@ Available tools:
   QUEUED. Read it. A queued message has not been seen, so silence from that peer
   is not an answer and waiting on one is a mistake.
 - fam_set_availability: Pause/resume incoming messages (available/unavailable)
+- fam_create_task / fam_assign_task / fam_close_task / fam_list_tasks: Record
+  work so it survives you. If your process is killed mid-task, work that exists
+  only in your context is invisible to everyone; a task whose owner has gone away
+  shows up as unattended. On startup, list open tasks — a restart is exactly when
+  work gets orphaned. If you are stopping and cannot finish something, ASSIGN IT
+  TO NULL rather than leaving it owned by you: an unowned task is visible, a task
+  owned by a process that is gone only looks assigned.
 - fam_set_summary: One or two sentences on what you are working on. This is how
   others route to you instead of broadcasting. Set it when you start something,
   and re-set it when it is still true — readers see its age and discount old
@@ -472,6 +479,64 @@ When you start, proactively list entities and channels to understand who's avail
           };
         }
         
+        case 'fam_create_task': {
+          const { title, ref, owner_entity_id } = args as any;
+          if (typeof title !== 'string' || !title.trim()) {
+            return { content: [{ type: 'text' as const, text: 'title is required' }], isError: true };
+          }
+          const r = await client.createTask({ title, ref, owner_entity_id });
+          return {
+            content: [{
+              type: 'text' as const,
+              text: r.task.owner_entity_id
+                ? `Task ${r.task.id} recorded, owned by ${r.task.owner_entity_id}.`
+                : `Task ${r.task.id} recorded, UNOWNED — visible to whoever is coordinating.`,
+            }],
+          };
+        }
+
+        case 'fam_assign_task': {
+          const { task_id, owner_entity_id } = args as any;
+          if (!task_id) {
+            return { content: [{ type: 'text' as const, text: 'task_id is required' }], isError: true };
+          }
+          const r = await client.assignTask(task_id, owner_entity_id ?? null);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: r.task.owner_entity_id
+                ? `Task ${task_id} now owned by ${r.task.owner_entity_id}.`
+                : `Task ${task_id} set down — unowned and visible for somebody to pick up.`,
+            }],
+          };
+        }
+
+        case 'fam_close_task': {
+          const { task_id, status } = args as any;
+          if (status !== 'done' && status !== 'cancelled') {
+            return {
+              content: [{ type: 'text' as const, text: 'status must be "done" or "cancelled"' }],
+              isError: true,
+            };
+          }
+          await client.closeTask(task_id, status);
+          return { content: [{ type: 'text' as const, text: `Task ${task_id} closed as ${status}.` }] };
+        }
+
+        case 'fam_list_tasks': {
+          const { status } = args as any;
+          const r = await client.listTasks(status);
+          const tasks: any[] = r.tasks ?? [];
+          if (tasks.length === 0) {
+            return { content: [{ type: 'text' as const, text: 'No tasks.' }] };
+          }
+          const lines = tasks.map(t =>
+            `${t.id}  [${t.status}]  ${t.owner_entity_id ?? 'UNOWNED'}  ${t.title}` +
+            (t.ref ? `  (${t.ref})` : '')
+          );
+          return { content: [{ type: 'text' as const, text: lines.join(String.fromCharCode(10)) }] };
+        }
+
         case 'fam_set_summary': {
           const { summary } = args as any;
           if (summary !== null && typeof summary !== 'string') {

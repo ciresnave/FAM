@@ -11,6 +11,8 @@ import { healthRoutes } from './health';
 import { adminRoutes } from './admin';
 import { adminSessionRoutes } from './adminSession';
 import { adminUiRoutes } from './adminUi';
+import { taskRoutes } from './tasks';
+import { PermissionChecker } from '../services/permissionChecker';
 
 // ============================================================================
 // Types
@@ -46,6 +48,7 @@ export function setupRoutes(
     ...adminRoutes(ctx, wsManager),
     ...adminSessionRoutes(ctx),
     ...adminUiRoutes(),
+    ...taskRoutes(ctx, new PermissionChecker(ctx)),
   ];
   
   return buildRouteMap(allRoutes);

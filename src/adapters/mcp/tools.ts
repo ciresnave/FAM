@@ -158,6 +158,76 @@ export const FAM_TOOLS = [
     },
   },
   {
+    name: 'fam_create_task',
+    description:
+      'Record a piece of work so it survives you. If your process is killed ' +
+      'mid-task, an unowned or offline-owned task is VISIBLE to whoever is ' +
+      'coordinating; work that exists only in your context is not. Give it an ' +
+      'owner (yours or another entity you can message) or leave it unowned for ' +
+      'somebody to pick up. `ref` is an opaque external identifier such as a PR ' +
+      'number — FAM never parses it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string' as const, description: 'What the work is, in a line' },
+        ref: { type: 'string' as const, description: 'Optional external ref, e.g. "fuel#29"' },
+        owner_entity_id: {
+          type: 'string' as const,
+          description: 'Who owns it. Omit to leave it unowned.',
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'fam_assign_task',
+    description:
+      'Hand work to another entity, take it yourself, or set it down by passing ' +
+      'owner_entity_id as null. Setting it down is the honest move when you are ' +
+      'stopping — an unowned task is visible, whereas a task owned by a process ' +
+      'that has gone away only looks assigned.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        task_id: { type: 'string' as const },
+        owner_entity_id: {
+          type: ['string', 'null'] as any,
+          description: 'New owner, or null to leave it unowned',
+        },
+      },
+      required: ['task_id', 'owner_entity_id'],
+    },
+  },
+  {
+    name: 'fam_close_task',
+    description:
+      'Close work as "done" or "cancelled". The two are different facts and the ' +
+      'distinction is not cosmetic: done means it happened, cancelled means it ' +
+      'will not. Closing work stops it appearing as unattended.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        task_id: { type: 'string' as const },
+        status: { type: 'string' as const, enum: ['done', 'cancelled'] },
+      },
+      required: ['task_id', 'status'],
+    },
+  },
+  {
+    name: 'fam_list_tasks',
+    description:
+      "List your account's tasks. Use it on startup to find work that was left " +
+      'unowned or whose owner is gone — a restart is exactly when that happens, ' +
+      'and nothing else will tell you.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string' as const, enum: ['open', 'done', 'cancelled'] },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'fam_set_summary',
     description:
       'Set a one or two sentence summary of what you are currently working on, ' +

@@ -350,6 +350,24 @@ export function adminRoutes(
       },
     },
 
+    // POST /admin/api/tasks/unattended
+    // Open work in this account that nobody is currently on.
+    //
+    // Account-scoped because the person who needs this is the account holder
+    // looking at a console, not an agent. Derived at read time — a stored
+    // "orphaned" flag goes stale the moment an owner reconnects.
+    {
+      method: 'POST',
+      pattern: '/admin/api/tasks/unattended',
+      handler: async (req) => {
+        const { accountId } = await requireAccountAuth(ctx, req);
+        return new Response(
+          JSON.stringify({ unattended: ctx.tasks.findUnattended(accountId) }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
     // POST /admin/api/directory
     // List the account's directory: own entities + entities actively granted
     // to this account by other accounts. Feeds the admin website's directory

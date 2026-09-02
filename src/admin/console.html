@@ -167,6 +167,17 @@
                  border-radius:7px;padding:9px"></textarea>
         <p><button class="link" id="keyfile-dismiss">I have saved it — dismiss</button></p>
       </div>
+      <div class="panel" id="unattended" hidden>
+        <h2>Work nobody is on</h2>
+        <p class="hint">
+          Open tasks that are either unowned or whose owner is not connected.
+          <strong>These are different problems.</strong> Unowned work needs
+          somebody assigned; work whose owner has gone away needs re-queueing,
+          and until it is, it looks assigned to a coordinator and is assigned to
+          nobody.
+        </p>
+        <div id="unattended-rows"></div>
+      </div>
       <div class="panel" id="collisions" hidden>
         <h2>Two of your agents are in the same place</h2>
         <p class="hint">
@@ -344,6 +355,38 @@ async function loadAgents() {
   // and a per-row field would make the reader reconstruct it by comparing rows
   // — which is exactly what nobody did when two sessions shared a checkout and
   // both claimed the same commits.
+  // Unattended work. Fetched here because this is the screen an account holder
+  // already looks at, and a list nobody opens is not a signal.
+  try {
+    const { unattended } = await api('/admin/api/tasks/unattended', {});
+    const ubox = $('unattended');
+    const urows = $('unattended-rows');
+    urows.innerHTML = '';
+    const items = unattended || [];
+    ubox.hidden = items.length === 0;
+    for (const u of items) {
+      const line = document.createElement('div');
+      line.style.marginBottom = '8px';
+
+      const what = document.createElement('div');
+      what.textContent = u.task.title + (u.task.ref ? '  (' + u.task.ref + ')' : '');
+      line.appendChild(what);
+
+      // The two reasons are rendered differently on purpose: "re-queue it" and
+      // "assign it to somebody" are different actions.
+      const why = document.createElement('span');
+      why.className = 'chip';
+      why.textContent = u.reason === 'unowned'
+        ? 'unowned — needs an owner'
+        : 'owner offline' + (u.owner_last_seen ? ' — last seen ' + (ago(u.owner_last_seen) || u.owner_last_seen) : '');
+      line.appendChild(why);
+
+      urows.appendChild(line);
+    }
+  } catch (e) {
+    note('msg', e.message);
+  }
+
   const box = $('collisions');
   const rows = $('collision-rows');
   rows.innerHTML = '';

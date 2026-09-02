@@ -51,6 +51,7 @@ import { AdminSessionRepository } from './repositories/adminSession';
 import { InvitationRepository } from './repositories/invitation';
 import { GrantRepository } from './repositories/grant';
 import { PermissionRepository } from './repositories/permission';
+import { TaskRepository } from './repositories/task';
 
 export interface DatabaseContext {
   db: Database;
@@ -63,6 +64,7 @@ export interface DatabaseContext {
   invitations: InvitationRepository;
   grants: GrantRepository;
   permissions: PermissionRepository;
+  tasks: TaskRepository;
 
   /**
    * Execute a function within a transaction.
@@ -85,6 +87,7 @@ export function createContext(db: Database): DatabaseContext {
   const invitations = new InvitationRepository(db);
   const grants = new GrantRepository(db);
   const permissions = new PermissionRepository(db);
+  const tasks = new TaskRepository(db);
 
   return {
     db,
@@ -97,6 +100,7 @@ export function createContext(db: Database): DatabaseContext {
     invitations,
     grants,
     permissions,
+    tasks,
     transaction: (fn) => transaction(db, fn),
     transactionAsync: (fn) => transactionAsync(db, fn),
   };

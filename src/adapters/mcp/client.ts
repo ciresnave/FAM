@@ -293,6 +293,50 @@ export class FamClient {
     });
   }
   
+  /** Record a piece of work, optionally naming who owns it. */
+  async createTask(input: {
+    title: string;
+    ref?: string | null;
+    owner_entity_id?: string | null;
+  }): Promise<any> {
+    if (!this.entityId || !this.sessionId) throw new Error('Not authenticated');
+    return this.request('/tasks/create', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      ...input,
+    });
+  }
+
+  /** Hand work to someone, take it yourself, or set it down with null. */
+  async assignTask(taskId: string, ownerEntityId: string | null): Promise<any> {
+    if (!this.entityId || !this.sessionId) throw new Error('Not authenticated');
+    return this.request('/tasks/assign', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      task_id: taskId,
+      owner_entity_id: ownerEntityId,
+    });
+  }
+
+  async closeTask(taskId: string, status: 'done' | 'cancelled'): Promise<any> {
+    if (!this.entityId || !this.sessionId) throw new Error('Not authenticated');
+    return this.request('/tasks/close', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      task_id: taskId,
+      status,
+    });
+  }
+
+  async listTasks(status?: 'open' | 'done' | 'cancelled'): Promise<any> {
+    if (!this.entityId || !this.sessionId) throw new Error('Not authenticated');
+    return this.request('/tasks/list', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      status,
+    });
+  }
+
   /**
    * Publish this session's context bag.
    *

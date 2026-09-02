@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -439,6 +439,45 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // Keys must be namespaced precisely to keep the core ignorant. A bare `cwd`
     // would be FAM asserting a concept it does not have.
     addColumnIfMissing('entities', 'context', 'TEXT'),
+  ],
+  14: [
+    // Work with an owner, so "nobody is doing this" is a QUERY.
+    //
+    // THE MEASURED HARM: a lane killed mid-task leaves work that HAD an owner
+    // and LOST them, and nothing detects it. An architect's own words: "it
+    // looks assigned in my head and is assigned to nobody." Fuel PR #29 sat
+    // written, approved and unmerged for FOUR DAYS because its author was
+    // killed and the task was never re-queued.
+    //
+    // Nothing FAM already has answers this. queue_empty, last_state_change and
+    // session liveness read as a triple answer "is this AGENT stalled?" — an
+    // orphaned task is about the WORK, which is invisible to all of them.
+    //
+    // THE CORE MUST NOT LEARN WHAT THE WORK IS. `title` and `ref` are opaque:
+    // "fuel#29" is a string this schema never parses, the same discipline that
+    // keeps `mcp.cwd` meaningless to the context bag.
+    //
+    // owner_entity_id is ON DELETE SET NULL, deliberately and not by default:
+    // deleting an entity must ORPHAN the work, not destroy it. Destroying work
+    // when its owner is removed is the exact failure this table exists to
+    // prevent, and a CASCADE here would implement it.
+    `CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      owner_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+      title TEXT NOT NULL,
+      ref TEXT,
+      status TEXT NOT NULL DEFAULT 'open'
+        CHECK(status IN ('open', 'done', 'cancelled')),
+      created_by_entity TEXT REFERENCES entities(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      assigned_at TEXT,
+      closed_at TEXT
+    )`,
+    // The hot query: open work in one account, joined to its owner's liveness.
+    `CREATE INDEX IF NOT EXISTS idx_tasks_account_status
+       ON tasks(account_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_entity_id)`,
   ],
   9: [
     // Browser sessions for the admin console.

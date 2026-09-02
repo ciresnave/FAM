@@ -92,7 +92,8 @@ been removed from both checkouts — every configured remote now resolves.
   the frozen v1 baseline; post-v1 changes go in the `MIGRATIONS` registry, never
   by editing the baseline.
 - `src/crypto/` — Ed25519 identity keys, X25519 encryption keys, Argon2id +
-  AES-256-GCM key files, nonce challenge-response.
+  AES-256-GCM (Advanced Encryption Standard, 256-bit key, Galois/Counter Mode)
+  key files, nonce challenge-response.
 
   **Two different message encryptions live here and they are not substitutes.
   Always say under whose key.** `message-encryption.ts` encrypts rows at rest
@@ -102,12 +103,24 @@ been removed from both checkouts — every configured remote now resolves.
   the relay. A claim that "messages are encrypted" is ambiguous between a
   property FAM has and one it did not have until `33dd549`.
 
+  *That rule is absolute on purpose, and a hedged version would reintroduce the
+  defect it was written for.* `message-encryption.ts` was read as providing
+  confidentiality from the relay for as long as it existed, because its NAME
+  matches that requirement and nothing forced the question. "Usually say under
+  whose key" leaves exactly the gap the omission already walked through once.
+
   **Entity identity keys are Ed25519 and cannot encrypt**, which is why the
   X25519 key exists rather than being reused. Do not reach for the Ed25519→
   X25519 conversion to avoid the second key: measured on Bun 1.3.14, an Ed25519
   public key *imports* as X25519 and *derives 32 plausible bytes*, while its own
   private half is refused — so you get ciphertext the recipient can never open,
   and every check short of testing agreement passes.
+
+  *Also absolute on purpose.* The conversion is not wrong-in-most-cases, it is
+  wrong-with-a-passing-smoke-test: the failure appears only when the recipient
+  tries to read, which is after the message is gone. A rule with an escape
+  hatch here is a rule that will be escaped by whoever is trying to avoid a
+  migration, which is the exact person it is addressed to.
 - `src/auth/` — OAuth 2.0 (Google, GitHub), HMAC token hashing.
 - `src/server/` — `Bun.serve()` HTTP + WebSocket, rate limiting, permission
   matrix, cross-account grants. `MessageSendService` is the single authoritative

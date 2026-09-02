@@ -284,6 +284,56 @@ than being re-derived from a name each time.
 Nothing here tells Bob that a repository is *Alice's* — only that whoever
 controls it has been consistent.
 
+**But it becomes a much cheaper exchange.** Instead of comparing a key
+fingerprint, the two people exchange **forge usernames** — something they very
+likely already know about each other, and which carries a public history that a
+freshly minted key does not.
+
+⚠️ **Weaker in one specific way, and worth knowing:** a username can be
+typosquatted in a way a fingerprint cannot. `github.com/ciresnave` and a
+lookalike are one glyph apart, and a key comparison has no such failure mode.
+**The mitigation is that a forge account has a visible history — commits,
+organisations, collaborators — so a wrong one is unusually easy to notice.**
+
+#### The same repository answers discovery
+
+**CireSnave:** *"If we know where they push their git repos, we know their keys,
+agents, etc."*
+
+**The account holder's repository carries the server address alongside the
+key**, so finding a peer's FAM server is the same fetch that finds their key. No
+DNS, no rendezvous service, no directory to run.
+
+**And here the address can be SIGNED**, which is better than the untrusted phone
+book described earlier: it is published in a repository only the holder can push
+to, and can additionally be signed by their account key. A peer reading it knows
+both where to connect and that the holder said so.
+
+```
+github.com/<user>/<user>
+  fam/account.pub     the account public key
+  fam/server          where this holder's FAM server currently is
+```
+
+⚠️ **But NOT the agent roster.** Vouchers bind entity keys to the account key,
+and they are verifiable by anyone holding that account key — so they travel over
+FAM itself, signed, rather than being published. Two reasons:
+
+- **Publishing the roster would reverse a decision already made.** FAM went to
+  some trouble to avoid enumeration: grants may name accounts that do not exist,
+  and error messages refuse to distinguish "not yours" from "no such entity". A
+  world-readable list of every agent an account runs undoes that for no gain.
+- **It would make routine work a git operation.** Creating an agent should not
+  require a push.
+
+**So the repository carries the ROOT OF TRUST and the ADDRESS — the two things a
+peer cannot get any other way. Everything else flows in-band, signed.**
+
+**The cost is a staleness window on the address.** A holder who moves machines
+pushes, and peers reach them once they re-fetch. Cached addresses keep working
+until then; a peer that cannot connect should re-fetch before concluding the
+peer is gone.
+
 ### Revocation has a staleness window, and it needs two paths
 
 Git is pull, not push: a peer does not learn of a revocation until they fetch.
@@ -365,13 +415,25 @@ every previously signed statement is ambiguous.
 
 ## Still open
 
-1. **Discovery mechanism.** DNS, rendezvous, or git-carried addresses. The
-   staleness window is the deciding factor and it has not been measured.
-2. **Countersigned rotation.** Requiring N existing collaborators to sign a key
-   rotation is the only mechanism discussed that defends account-key compromise
-   *cryptographically* rather than socially. **Per-account repositories narrow
-   the need for it** by requiring a second, independent credential to publish, so
-   it may no longer be worth its coordination cost. Undecided.
+1. ~~**Discovery mechanism.**~~ **SETTLED:** the account holder's own repository
+   carries the server address beside the key, so discovery is the fetch that
+   already had to happen. What remains is not a design question but a
+   measurement — how long a stale address is tolerable before a peer re-fetches.
+2. ~~**Countersigned rotation.**~~ **DISSOLVED, not decided.** It existed to
+   solve "a compromised key signs its own replacement". Under per-account
+   repositories that problem has no instance: **a rotation is not authorized by
+   the FAM key at all — it is authorized by forge write access.** A thief holding
+   the account key cannot publish anything. The mechanism has no job.
+
+   ⚠️ **The property this chooses, stated so it is a decision rather than an
+   inheritance: there is no cryptographic continuity on the root key.** Whoever
+   controls the forge account controls the identity, with no signature chain
+   linking a new key to the old one. Requiring the old key to *also* sign the new
+   one would block a forge-compromised attacker — at the cost that losing the FAM
+   key would force out-of-band re-establishment with every peer. **Chosen:
+   recoverability over attack resistance**, because the account key is a human
+   credential and humans lose those, while a forge account is one they already
+   defend with 2FA.
 3. **Whether entity keys are vouched individually or by a wildcard** ("all
    agents of this account"), which interacts with how consent is expressed.
 4. **What a voucher and a revocation look like on the wire** — format, and where

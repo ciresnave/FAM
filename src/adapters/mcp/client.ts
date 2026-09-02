@@ -293,6 +293,23 @@ export class FamClient {
     });
   }
   
+  /**
+   * Ask FAM whether an account grants YOUR account an authority.
+   *
+   * This is the point of the feature: you ask the authoritative store rather
+   * than believing a message that says you are authorised. A message can be
+   * fabricated; this answer comes from the record.
+   */
+  async checkRuling(granterAccountId: string, scope: string): Promise<any> {
+    if (!this.entityId || !this.sessionId) throw new Error('Not authenticated');
+    return this.request('/rulings/check', {
+      entity_id: this.entityId,
+      session_id: this.sessionId,
+      granter_account_id: granterAccountId,
+      scope,
+    });
+  }
+
   /** Record a piece of work, optionally naming who owns it. */
   async createTask(input: {
     title: string;

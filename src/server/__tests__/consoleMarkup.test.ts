@@ -156,3 +156,20 @@ describe('unattended work distinguishes its two causes', () => {
     expect(html).toContain('id="unattended"');
   });
 });
+
+describe('a ruling note never renders without its author', () => {
+  // The observed failure: a derived convention filed adjacent to a quoted grant
+  // was thereafter read back as the granter's. Querying removes the adjacency
+  // only if the rendering keeps the attribution attached.
+  test('the note is rendered together with note_author_entity', () => {
+    const body = html.slice(html.indexOf('<script>'), html.lastIndexOf('</script>'));
+    expect(body).toContain('r.note_author_entity');
+    // and the body is rendered as the granter's own words
+    expect(body).toContain('r.body');
+  });
+
+  test('the Authority tab exists and is wired', () => {
+    expect(html).toContain('id="tab-rulings"');
+    expect(html).toContain("$('ruling-form').onsubmit");
+  });
+});

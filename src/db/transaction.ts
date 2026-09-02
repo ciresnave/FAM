@@ -53,6 +53,7 @@ import { GrantRepository } from './repositories/grant';
 import { PermissionRepository } from './repositories/permission';
 import { TaskRepository } from './repositories/task';
 import { MessageRefRepository } from './repositories/messageRef';
+import { RulingRepository } from './repositories/ruling';
 
 export interface DatabaseContext {
   db: Database;
@@ -67,6 +68,7 @@ export interface DatabaseContext {
   permissions: PermissionRepository;
   tasks: TaskRepository;
   messageRefs: MessageRefRepository;
+  rulings: RulingRepository;
 
   /**
    * Execute a function within a transaction.
@@ -91,6 +93,7 @@ export function createContext(db: Database): DatabaseContext {
   const permissions = new PermissionRepository(db);
   const tasks = new TaskRepository(db);
   const messageRefs = new MessageRefRepository(db);
+  const rulings = new RulingRepository(db);
 
   return {
     db,
@@ -105,6 +108,7 @@ export function createContext(db: Database): DatabaseContext {
     permissions,
     tasks,
     messageRefs,
+    rulings,
     transaction: (fn) => transaction(db, fn),
     transactionAsync: (fn) => transactionAsync(db, fn),
   };

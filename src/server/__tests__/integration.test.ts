@@ -1150,6 +1150,7 @@ describe('FAM Server Integration', () => {
         '/admin/api/directory',
         '/admin/api/entities/availability', '/admin/api/entities/rederive-queue',
         '/admin/api/tasks/unattended',
+        '/admin/api/rulings', '/admin/api/rulings/list', '/admin/api/rulings/revoke',
       ]);
 
       const unclassified: string[] = [];

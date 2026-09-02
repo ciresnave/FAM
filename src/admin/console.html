@@ -115,6 +115,7 @@
       <button data-tab="given">Access I've given</button>
       <button data-tab="received">Access I've received</button>
       <button data-tab="rules">Rules</button>
+      <button data-tab="rulings">Authority</button>
     </nav>
 
     <div id="msg"></div>
@@ -223,6 +224,36 @@
       <div class="panel scroll"><table>
         <thead><tr><th>Entity</th><th>From</th><th>Status</th><th>Since</th></tr></thead>
         <tbody id="received-rows"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-rulings" hidden>
+      <h2>Authority you have granted</h2>
+      <p class="hint">
+        A ruling is a <strong>record the grantee queries</strong>, not a message
+        they have to believe. An agent told it may act on your behalf can ask FAM
+        and get an answer from here — which is why a forwarded message quoting
+        you is not, and should not be, enough.
+        <strong>What you write in the body is quoted verbatim to them.</strong>
+        A note is an interpretation and is shown as its author's, never as yours.
+      </p>
+      <div class="panel">
+        <form id="ruling-form">
+          <label>Grant to
+            <input id="ruling-to" type="email" placeholder="them@example.com" required>
+          </label>
+          <label>Scope
+            <input id="ruling-scope" placeholder="publish:vulkane" required>
+          </label>
+          <label>In your words
+            <input id="ruling-body" placeholder="You may publish on my behalf." required>
+          </label>
+          <button class="go" type="submit">Grant</button>
+        </form>
+      </div>
+      <div class="panel scroll"><table>
+        <thead><tr><th>Scope</th><th>Granted to</th><th>Your words</th><th>Issued</th><th></th></tr></thead>
+        <tbody id="rulings-rows"></tbody>
       </table></div>
     </section>
 
@@ -591,10 +622,71 @@ async function loadRules() {
   }, 'No rules. Anything you have shared is reachable; nothing else is.');
 }
 
-const LOADERS = { agents: loadAgents, given: loadGiven, received: loadReceived, rules: loadRules };
+async function loadRulings() {
+  const { rulings } = await api('/admin/api/rulings/list', { direction: 'given' });
+  fill($('rulings-rows'), rulings, (r) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(codeTd(r.scope));
+    tr.appendChild(codeTd(r.grantee_account_id));
+
+    // The body is the granter's words. A note is an interpretation and is
+    // rendered WITH its author — never beside the quote unattributed, which is
+    // how a derived reading ends up being read as the granter's.
+    const words = document.createElement('td');
+    const quote = document.createElement('div');
+    quote.textContent = r.body;
+    words.appendChild(quote);
+    if (r.note) {
+      const note = document.createElement('span');
+      note.className = 'chip';
+      note.textContent = 'note by ' + (r.note_author_entity || 'unknown') + ': ' + r.note;
+      words.appendChild(note);
+    }
+    tr.appendChild(words);
+
+    tr.appendChild(td(r.revoked_at ? 'revoked ' + when(r.revoked_at) : when(r.issued_at)));
+
+    const actions = document.createElement('td');
+    if (!r.revoked_at) {
+      const b = document.createElement('button');
+      b.className = 'link';
+      b.textContent = 'Revoke';
+      b.onclick = async () => {
+        try {
+          await api('/admin/api/rulings/revoke', { ruling_id: r.id });
+          await loadRulings();
+          // Revoked, not deleted: that authority was once given stays part of
+          // the record, because a grantee who acted while it stood needs it.
+          note('msg', 'Authority revoked. The record of it stays.', 'ok');
+        } catch (e) { note('msg', e.message); }
+      };
+      actions.appendChild(b);
+    }
+    tr.appendChild(actions);
+    return tr;
+  }, 'You have granted no authority.');
+}
+
+const LOADERS = { agents: loadAgents, given: loadGiven, received: loadReceived, rules: loadRules, rulings: loadRulings };
 
 async function show(tab) {
-  for (const b of document.querySelectorAll('nav button')) {
+  $('ruling-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  try {
+    await api('/admin/api/rulings', {
+      grantee_account_id: $('ruling-to').value.trim(),
+      scope: $('ruling-scope').value.trim(),
+      body: $('ruling-body').value.trim(),
+    });
+    $('ruling-to').value = '';
+    $('ruling-scope').value = '';
+    $('ruling-body').value = '';
+    await loadRulings();
+    note('msg', 'Recorded. They can now verify it with FAM rather than taking your word second-hand.', 'ok');
+  } catch (e) { note('msg', e.message); }
+};
+
+for (const b of document.querySelectorAll('nav button')) {
     b.setAttribute('aria-current', String(b.dataset.tab === tab));
   }
   for (const key of Object.keys(LOADERS)) {

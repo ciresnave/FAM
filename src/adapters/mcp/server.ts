@@ -182,12 +182,10 @@ async function resolveGitRoot(): Promise<string | null> {
  * against, and the identity it ran as — never as a bare `durable: true`, which
  * would be one more unverifiable self-attestation.
  */
-async function gitDurability(sha: string): Promise<{
-  durable: boolean;
-  construct: string;
-  takenAt: string;
-  takenAs: string;
-} | null> {
+async function gitDurability(sha: string): Promise<
+  | { ok: true; durable: boolean; construct: string; takenAt: string; takenAs: string }
+  | { ok: false; reason: string }
+> {
   async function git(args: string[]): Promise<string | null> {
     try {
       const proc = Bun.spawn(['git', ...args], { stdout: 'pipe', stderr: 'ignore' });
@@ -201,7 +199,15 @@ async function gitDurability(sha: string): Promise<{
 
   const defaultRef = (await git(['rev-parse', '--abbrev-ref', 'origin/HEAD'])) ?? 'origin/main';
   const headSha = await git(['rev-parse', defaultRef]);
-  if (!headSha) return null;
+  if (!headSha) {
+    // "Could not check" is NOT "checked and found unreachable".
+    //
+    // Returning null here and treating it as no-claim collapsed two world
+    // states into one output — the same defect `taken_as` exists to prevent,
+    // reappearing inside the mechanism that prevents it. The reason travels so
+    // the sender can see WHY there is no durability claim on their message.
+    return { ok: false, reason: `cannot resolve ${defaultRef} in this checkout` };
+  }
 
   const proc = Bun.spawn(['git', 'merge-base', '--is-ancestor', sha, defaultRef], {
     stdout: 'ignore',
@@ -212,6 +218,7 @@ async function gitDurability(sha: string): Promise<{
   const identity = (await git(['config', 'user.email'])) ?? 'unknown';
 
   return {
+    ok: true,
     durable: proc.exitCode === 0,
     construct: 'reachable from ' + defaultRef + ' as fetched in this checkout',
     takenAt: defaultRef + '@' + headSha,
@@ -393,6 +400,7 @@ When you start, proactively list entities and channels to understand who's avail
           // Build references BEFORE sending, so an unbuildable one fails the
           // send rather than arriving as a message that quietly lacks it.
           const refs: Array<{ kind: string; mode: string; payload: Record<string, string> }> = [];
+          let durabilityUnchecked: string | null = null;
           const gitRef = (args as any).git_ref;
           if (gitRef?.sha) {
             refs.push({
@@ -409,7 +417,7 @@ When you start, proactively list entities and channels to understand who's avail
             // recipient can only re-run it — so it owes construct, taken_at and
             // taken_as like any other measurement.
             const d = await gitDurability(String(gitRef.sha));
-            if (d) {
+            if (d.ok) {
               refs.push({
                 kind: 'git.durable',
                 mode: 'reproducible',
@@ -421,6 +429,12 @@ When you start, proactively list entities and channels to understand who's avail
                   subject: String(gitRef.sha),
                 },
               });
+            } else {
+              // No claim is fabricated — a reproducible reference owes a real
+              // taken_at and there is none. But the sender is TOLD, because a
+              // tool that promises the check and silently omits it leaves them
+              // believing the recipient got something they did not.
+              durabilityUnchecked = d.reason;
             }
           }
 
@@ -429,7 +443,15 @@ When you start, proactively list entities and channels to understand who's avail
               to_entity, text, refs.length ? refs : undefined
             );
             return {
-              content: [{ type: 'text' as const, text: describeDelivery(to_entity, result) }],
+              content: [{
+                type: 'text' as const,
+                text: describeDelivery(to_entity, result) +
+                  (durabilityUnchecked
+                    ? ` NOTE: durability NOT checked (${durabilityUnchecked}) — the recipient ` +
+                      'has the sha but no reachability claim, which is different from a claim ' +
+                      'that it is unreachable.'
+                    : ''),
+              }],
             };
           } else if (channel_id) {
             const result = await client.sendChannelMessage(channel_id, text);

@@ -63,6 +63,11 @@ export class ChannelPushHandler {
         channel: message.channel,
         sent_at: message.timestamp,
         message_id: message.message_id,
+        // Carried through, not dropped. The core stored the references and the
+        // frame delivered them; discarding them HERE meant a reference survived
+        // everywhere except the one place a recipient reads — a data-loss path
+        // inside the feature built to stop references going missing.
+        refs: (message as any).refs,
       });
       
       console.error(`[fam-push] Pushed message from ${message.from}: ${message.text.slice(0, 80)}`);

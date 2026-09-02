@@ -91,26 +91,31 @@ export class MessageSendService {
     // — the grant said no by the time the row existed.
     const storedText = await this.ctx.messages.prepareStoredText(trimmed);
 
+    // Validate references BEFORE anything is written.
+    //
+    // Attaching them after the insert meant an invalid reference threw with the
+    // message row already persisted: the caller saw an error and the recipient
+    // saw a bare message. "The send failed" and "the send half-succeeded" are
+    // different facts, and the second one is the dangerous shape this whole
+    // feature exists to remove.
+    if (refs) {
+      for (const ref of refs) this.ctx.messageRefs.validate(ref);
+    }
+
     const message = this.ctx.db.transaction(() => {
       if (!this.permissionChecker.canDirectMessage(sender, recipient)) {
         throw new ForbiddenError('Not permitted to message this entity');
       }
-      return this.ctx.messages.insertDirectMessage(fromEntityId, toEntityId, storedText, trimmed);
-    })();
-
-    // References are attached after the row exists and BEFORE the push, so a
-    // recipient that is online receives the message with its references rather
-    // than a bare text it has to ask about. A reference that arrives separately
-    // is a reference that can be lost.
-    //
-    // Validation lives in the repository, so an invalid reference throws here
-    // and the caller learns their reference was rejected — rather than the
-    // message landing without it and looking like a successful send.
-    if (refs && refs.length > 0) {
-      for (const ref of refs) {
-        this.ctx.messageRefs.attach(message.id, ref);
+      const inserted = this.ctx.messages.insertDirectMessage(
+        fromEntityId, toEntityId, storedText, trimmed
+      );
+      // Inside the transaction, so a message and its references land together
+      // or not at all.
+      if (refs) {
+        for (const ref of refs) this.ctx.messageRefs.attach(inserted.id, ref);
       }
-    }
+      return inserted;
+    })();
 
     // Push to recipient if online, and KEEP the answer.
     const outcome = this.wsManager.pushToEntity(toEntityId, {

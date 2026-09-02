@@ -203,3 +203,57 @@ describe('references live and die with their message', () => {
     expect(ctx.messageRefs.listForMessage(m.id)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Findings from review of PR #3. Each was real; each is a shape this codebase
+// has met before, arriving inside the feature built to prevent it.
+// ---------------------------------------------------------------------------
+
+describe('the payload bound is measured in the unit it reports', () => {
+  // "Right number, wrong construct" — the limit counted JavaScript string
+  // CHARACTERS and reported BYTES, so a multibyte payload passed a bound it
+  // exceeded. Wrong in the permissive direction, which is the one that does not
+  // announce itself.
+  test('a multibyte payload within the CHARACTER count but over the BYTE limit is refused', () => {
+    // Each of these is 3 bytes in UTF-8 and 1 JavaScript character.
+    const wide = '中'.repeat(1500); // 1500 chars, 4500 bytes
+    expect(() =>
+      ctx.messageRefs.attach(messageId, {
+        kind: 'git.ref', mode: 'verifiable', payload: { digest: 'x', note: wide },
+      })
+    ).toThrow(/bytes/i);
+  });
+
+  test('an ASCII payload of the same character count is still accepted', () => {
+    const narrow = 'a'.repeat(1500); // 1500 chars, 1500 bytes
+    expect(() =>
+      ctx.messageRefs.attach(messageId, {
+        kind: 'git.ref', mode: 'verifiable', payload: { digest: 'x', note: narrow },
+      })
+    ).not.toThrow();
+  });
+});
+
+describe('a corrupt payload is not presented as a valid reference', () => {
+  // Coercing unreadable JSON to {} returned a reference that violates its own
+  // mode requirements while looking well-formed — hiding corruption behind a
+  // shape the caller trusts. The same "degrade quietly" instinct that made a
+  // 201 mean "stored" and read as "delivered".
+  test('reading a corrupted row raises rather than returning an empty payload', () => {
+    const ref = ctx.messageRefs.attach(messageId, {
+      kind: 'git.ref', mode: 'verifiable', payload: { digest: 'intact' },
+    });
+    ctx.db.prepare('UPDATE message_refs SET payload = ? WHERE id = ?').run('{not json', ref.id);
+
+    expect(() => ctx.messageRefs.getById(ref.id)).toThrow(/payload/i);
+  });
+
+  test('a payload that parses but is not an object also raises', () => {
+    const ref = ctx.messageRefs.attach(messageId, {
+      kind: 'git.ref', mode: 'verifiable', payload: { digest: 'intact' },
+    });
+    ctx.db.prepare('UPDATE message_refs SET payload = ? WHERE id = ?').run('"a string"', ref.id);
+
+    expect(() => ctx.messageRefs.getById(ref.id)).toThrow(/payload/i);
+  });
+});

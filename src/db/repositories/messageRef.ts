@@ -82,7 +82,14 @@ export class MessageRefRepository {
   // Validation — structure only, never meaning
   // --------------------------------------------------------------------------
 
-  private validate(input: MessageRefInput): void {
+  /**
+   * Check a reference without storing it.
+   *
+   * Public so a caller can reject bad input BEFORE committing anything else —
+   * validating inside attach() alone meant a send inserted its message row and
+   * then threw, leaving a message the caller believed was never sent.
+   */
+  validate(input: MessageRefInput): void {
     const { kind, mode, payload } = input;
 
     // Namespaced, for the reason context keys are: a bare `ref` would be FAM
@@ -150,9 +157,15 @@ export class MessageRefRepository {
     }
 
     const encoded = JSON.stringify(payload);
-    if (encoded.length > REF_PAYLOAD_MAX) {
+    // Measured in the unit it REPORTS. This compared JavaScript string
+    // characters while saying "bytes", so a multibyte payload passed a bound it
+    // exceeded — wrong in the permissive direction, which is the one that does
+    // not announce itself. Same defect as a correct count over an unstated
+    // construct, in a limit rather than a relay.
+    const byteLength = new TextEncoder().encode(encoded).byteLength;
+    if (byteLength > REF_PAYLOAD_MAX) {
       throw new ValidationError(
-        `Reference payload is ${encoded.length} bytes; the limit is ${REF_PAYLOAD_MAX}. ` +
+        `Reference payload is ${byteLength} bytes; the limit is ${REF_PAYLOAD_MAX}. ` +
           'Refused rather than trimmed: a partial payload would satisfy the mode ' +
           'requirements with fields that survived and stay silent about the rest.'
       );
@@ -160,20 +173,39 @@ export class MessageRefRepository {
   }
 
   private mapRow(row: any): MessageRef {
-    let payload: Record<string, string> = {};
+    // A corrupt payload RAISES rather than degrading to {}.
+    //
+    // Returning an empty object handed the caller a reference that violates its
+    // own mode requirements while looking well-formed — a verifiable reference
+    // with no digest, presented as valid. That hides corruption behind a shape
+    // the caller trusts, which is the same instinct that made a 201 mean
+    // "stored" and read as "delivered".
+    //
+    // Payloads are only ever written through validate(), so a malformed one
+    // means something else went wrong and should be loud.
+    let payload: unknown;
     try {
       payload = JSON.parse(row.payload);
     } catch {
-      // An unreadable payload is reported as empty rather than crashing every
-      // read of the message it hangs off.
-      payload = {};
+      throw new ValidationError(
+        `Reference ${row.id} has an unreadable payload. It was written through ` +
+          'validation, so this is corruption rather than a bad input, and returning ' +
+          'an empty object would present it as a valid reference.'
+      );
+    }
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+      throw new ValidationError(
+        `Reference ${row.id} has a payload that is not an object. See above: a ` +
+          'reference that cannot satisfy its own mode requirements must not be ' +
+          'returned as though it does.'
+      );
     }
     return {
       id: row.id,
       message_id: row.message_id,
       kind: row.kind,
       mode: row.mode,
-      payload,
+      payload: payload as Record<string, string>,
       created_at: row.created_at,
     };
   }

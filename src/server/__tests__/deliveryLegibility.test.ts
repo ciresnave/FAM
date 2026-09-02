@@ -161,3 +161,53 @@ describe('the outcome is observed, not inferred', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// From PR #3 review: a send that carries an invalid reference must leave NO
+// message behind. "The send failed" and "the send half-succeeded" are different
+// facts, and the second is the shape this whole feature exists to remove.
+// ---------------------------------------------------------------------------
+
+describe('a message and its references land together or not at all', () => {
+  test('an invalid reference leaves no message persisted', async () => {
+    const before = ctx.db
+      .prepare('SELECT COUNT(*) c FROM messages WHERE from_entity = ?')
+      .get(SENDER) as { c: number };
+
+    await expect(
+      sendService.sendDirectMessage(SENDER, LIVE, 'should not persist', [
+        // verifiable with no digest — refused by the repository
+        { kind: 'git.ref', mode: 'verifiable', payload: { repo: 'x' } } as any,
+      ])
+    ).rejects.toThrow();
+
+    const after = ctx.db
+      .prepare('SELECT COUNT(*) c FROM messages WHERE from_entity = ?')
+      .get(SENDER) as { c: number };
+
+    expect(after.c).toBe(before.c);
+  });
+
+  test('a valid reference lands with its message', async () => {
+    const { message } = await sendService.sendDirectMessage(SENDER, LIVE, 'with a ref', [
+      { kind: 'git.ref', mode: 'verifiable', payload: { digest: 'abc1234' } },
+    ]);
+    const refs = ctx.messageRefs.listForMessage(message.id);
+    expect(refs.length).toBe(1);
+    expect(refs[0]!.payload.digest).toBe('abc1234');
+  });
+
+  // The backlog path is the one that mattered: a reference reached everyone who
+  // did not need to ask and nobody who did.
+  test('an OFFLINE recipient still gets the references', async () => {
+    const { message } = await sendService.sendDirectMessage(SENDER, GONE, 'for later', [
+      { kind: 'git.ref', mode: 'verifiable', payload: { digest: 'deadbee' } },
+    ]);
+
+    const backlog = await ctx.messages.getUndelivered(GONE);
+    const found = backlog.find(m => m.id === message.id) as any;
+
+    expect(found).toBeDefined();
+    expect(found.refs?.[0]?.payload?.digest).toBe('deadbee');
+  });
+});

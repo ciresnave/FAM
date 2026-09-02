@@ -76,6 +76,89 @@ export function messageRoutes(
       },
     },
     
+    // POST /messages/send-sealed
+    // Send a direct message the server cannot read.
+    //
+    // ⚠️ A SEPARATE ROUTE, NOT A FLAG ON /messages/send. The service already
+    // splits sealed from plaintext into two methods so a caller must NAME the
+    // path; folding them back together at the edge would undo that one layer
+    // up. "Sealed if an envelope is present, plaintext otherwise" is a
+    // disjunction, and the failure it permits is the one this whole increment
+    // exists to prevent — a client that meant to seal, didn't, and got a 201.
+    //
+    // The route holds NO opinion about envelope validity. Shape, the
+    // sender/recipient binding and the signature are all the service's, for the
+    // same reason the permission matrix is: two places that check the same
+    // thing are two answers waiting to drift.
+    {
+      method: 'POST',
+      pattern: '/messages/send-sealed',
+      handler: async (req) => {
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { to_entity, envelope, text } = body;
+
+        // Both fields present is an AMBIGUITY, and resolving it silently is how
+        // the wrong path gets chosen. Whichever the server picked, half of
+        // callers would be surprised — and the surprising half sends plaintext
+        // believing it sealed.
+        if (text !== undefined && envelope !== undefined) {
+          return new Response(
+            JSON.stringify({
+              error:
+                'Send both "text" and "envelope"? Refusing: they name different send paths. ' +
+                'Use /messages/send for text, /messages/send-sealed for an envelope.',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Masked by the service's shape check on status alone — both give 400.
+        // Kept for the MESSAGE: a caller who simply forgot the field gets
+        // "Missing envelope" rather than a list of eleven fields that are all
+        // missing because the object is not there. Asserted in the tests, or
+        // this guard would be invisible and get deleted as redundant.
+        if (!envelope) {
+          return new Response(
+            JSON.stringify({ error: 'Missing envelope' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        if (!to_entity) {
+          return new Response(
+            // Channels are not supported yet: a channel message needs one
+            // content key wrapped per recipient, which is not built. Saying so
+            // beats a generic rejection that reads like a malformed request.
+            JSON.stringify({ error: 'Must specify to_entity. Sealed channel messages are not supported yet.' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        try {
+          entityRateLimiter.check(entity_id);
+        } catch (e) {
+          if (e instanceof RateLimitError) {
+            return new Response(
+              JSON.stringify(e.toJSON()),
+              { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(e.retryAfter) } }
+            );
+          }
+          throw e;
+        }
+
+        const { message, delivery } = await sendService.sendSealedDirectMessage(
+          entity_id,
+          to_entity,
+          envelope
+        );
+
+        return new Response(
+          JSON.stringify({ message_id: message.id, delivery }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
     // POST /messages/delivered
     // Mark messages as delivered
     {

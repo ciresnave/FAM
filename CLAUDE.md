@@ -110,6 +110,21 @@ been removed from both checkouts — every configured remote now resolves.
   under whose key" leaves exactly the gap the omission already walked through
   once.
 
+  ⚠️ **The two key custodies are NOT symmetric, and a claim about "signed, so
+  the relay cannot forge it" has to say which.** `POST /entities/encryption-key`
+  accepts a PUBLIC key only, so FAM never holds an X25519 private half —
+  confidentiality from the relay is genuine by construction. But
+  `POST /accounts/create-entity` GENERATES the Ed25519 identity pair
+  server-side (`src/server/routes/accounts.ts`), so **the server held that
+  private key once.** It is not stored, but a server compromised at creation
+  time can keep it and forge that entity's signatures forever.
+
+  **So: confidentiality is unconditional; authenticity assumes the server was
+  honest when the entity was created.** Do not repeat "a forgery requires a
+  private key" without that clause — the relay was given the key. The fix is
+  client-generated identity keys at creation; it is recorded in
+  `DESIGN-FEDERATION.md` and not yet built.
+
   **Entity identity keys are Ed25519 and cannot encrypt**, which is why the
   X25519 key exists rather than being reused. Do not reach for the Ed25519→
   X25519 conversion to avoid the second key: measured on Bun 1.3.14, an Ed25519

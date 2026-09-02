@@ -1196,6 +1196,30 @@ ECDH (libsodium's `crypto_box_seal` shape) in `src/crypto/sealing.ts`.
 
 #### Remaining in Phase 5
 
+- ⚠️ **NO CLIENT SEALS YET, so nothing in FAM is end-to-end encrypted in
+  practice.** Every primitive, route and send path exists; `src/adapters/mcp/`
+  and `src/adapters/cli/` both still send plaintext, and neither generates an
+  X25519 pair. **This is first on the list deliberately** — the arc reads as
+  finished from the commit log and is not, and a roadmap that lets it read that
+  way is the stale-claim defect this file has already been corrected for twice.
+
+- ⚠️ **ENTITY IDENTITY KEYS ARE GENERATED SERVER-SIDE, which makes envelope
+  signing conditional in a way the design text did not say.** Measured
+  2026-09-02 at `4a4de70`: `POST /accounts/create-entity` mints the Ed25519
+  pair (`src/server/routes/accounts.ts:215`) and returns the private half
+  encrypted under the passkey. It is **not stored** — `grep private_key
+  src/db/` returns nothing — **but the server held it.**
+  - **The asymmetry is the finding.** `POST /entities/encryption-key` accepts a
+    PUBLIC key only, so FAM never holds an X25519 private half and
+    confidentiality from the relay is genuine BY CONSTRUCTION. Identity has no
+    such guarantee: a server compromised at creation time keeps the key and
+    forges that entity's signatures indefinitely.
+  - **Fix: entity creation must accept a client-generated public key.** It
+    changes the creation flow, `bun run bootstrap`, and every test that creates
+    an entity — its own increment, not an appendix to another one.
+  - **Found by asking where the adapters would get their keys**, not by
+    reviewing the crypto. The crypto is right; the custody around it was not.
+
 - **Signing the envelope** — authenticity, still the Ed25519 half. Sealing
   deliberately says nothing about who sent a message.
 - **Per-recipient content-key wrapping for channels.** `messages.text` is one

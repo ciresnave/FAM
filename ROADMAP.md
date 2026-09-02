@@ -845,7 +845,7 @@ Summary of where it landed:
 **Buildable items are Phase 7 below**, with the Phase 5 precondition attached
 there.
 
-### Phase 7 — Messaging Model (7.1, 7.2, 7.3 DONE; 7.4 next; 7.5 unscheduled)
+### Phase 7 — Messaging Model (7.1–7.4 DONE; 7.5 unscheduled)
 
 Derived from `DESIGN-MESSAGING.md`.
 
@@ -1009,7 +1009,51 @@ PR #29, four days.
 - Persists across restart by the test in DESIGN-MESSAGING: a human should not
   have to re-tell a coordinator what its lanes were doing.
 
-**7.4 — Measurement provenance.** `{value, construct, ref, taken_at}` as a
+**7.4 — Measurement provenance. DONE.** No migration — 7.1 already built the
+mechanism and `reproducible` already enforces `construct` / `taken_at` /
+`taken_as`. What remained was the adapter surface, and the PM's framing decided
+its shape:
+
+> `taken_as` is your unit argument. A measurement whose construct and whose
+> STATED construct can drift apart is the identical defect one level up.
+
+- **You supply the COMMAND and its output, not the number and a description.**
+  The command is recorded **verbatim** as the construct. **There is no
+  parameter for a caller's own wording**, which is what makes drift impossible
+  rather than discouraged. *"48 vectors mentioning NaN"* becoming *"48 NaN
+  vectors"* is the defect; a per-function line count that swept the next
+  function's doc comments is another; `86/208` reported against a rule written
+  about `86/143` is a third. **The number was right every time.**
+- **This also makes `reproducible` mean what it claimed.** A recipient cannot
+  re-run prose. They can re-run a command. **A reproducible reference whose
+  construct is a description was never actually reproducible** — 7.1 defined the
+  mode correctly and the adapter surface is what makes it true.
+- ⚠️ **THE ADAPTER DOES NOT EXECUTE THE COMMAND, and that is a correction.** The
+  first version ran it via `sh -c` to guarantee the value came from the command.
+  A security review rejected it and was right: **the command arrives as an MCP
+  tool parameter, an agent's context can hold untrusted content, and a prompt
+  injection would therefore reach a shell THROUGH A MESSAGE-SENDING TOOL** —
+  plus an unbounded read and no timeout. The reasoning that let it through was
+  *"the agent can run commands anyway"*, **which is wrong in the way that
+  matters: when the agent runs one it passes through the harness's permission
+  layer, and that path did not.**
+  - **The deeper error was building a guarantee the design already provides.** A
+    `reproducible` reference is verified by the **recipient re-running it** —
+    that is the definition of the mode. Executing it in the adapter bought
+    nothing re-running does not, and paid remote code execution for it.
+  - The two protections divide cleanly, and neither needs execution:
+    **paraphrase drift is impossible because there is no prose field**;
+    **a fabricated value is caught by re-running**, which is the mode's contract.
+- **A failed command attaches NOTHING and says so.** "Could not measure" and
+  "measured zero" are different facts — the same distinction the durability
+  check had to learn. **An empty stdout with exit 0 IS a measurement** and is
+  kept, because discarding it alongside the failures would erase exactly the
+  finding a negative control exists to produce.
+- Same fix as the unit argument on `assertWithinLimit`: the defect was never a
+  wrong choice, it was that **the count and the statement of the count were
+  independently specifiable.**
+
+**7.4 — Measurement provenance (original scope).** `{value, construct, ref, taken_at}` as a
 `reproducible` reference. `construct` is the load-bearing field — four incidents
 in one day where the arithmetic was correct and the subject it ranged over was
 never stated. Staleness must be a **checkable ref**, not a wall clock: "taken at

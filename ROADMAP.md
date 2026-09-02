@@ -1075,6 +1075,61 @@ account→entity ownership chain.** Accounts hold no key material today
 (`entities` have keypairs; `accounts` have id, display_name and timestamps), so
 this is a schema question and not only a protocol one.
 
+### Injection-Shape Audit (2026-09-02) — one finding, already fixed; nothing else
+
+Dispatched after the 7.4 RCE: audit FAM's whole surface for the same shape, not
+just the adapter that had it.
+
+**THE CLASS SEARCHED FOR:** any place a parameter, header, body field, or stored
+value is interpolated into a command string, or reaches an interpreter —
+process execution, shell invocation, SQL built by interpolation, `eval` /
+`new Function`, HTML injected as markup, or a file path derived from input.
+
+**SEARCH SPACE, stated so the null means something:** all 69 tracked non-test
+source files under `src/`, all 35 test files, and the 6 legacy claude-peers
+files at the repo root (`broker.ts`, `cli.ts`, `index.ts`, `server.ts`,
+`shared/*`). Measured at `24ee1ed`.
+
+**THE NETWORK-FACING SURFACE IS CLEAN, and that is the result that matters.**
+`src/server/` — every route, the WebSocket handler, every repository reachable
+from them:
+
+```
+process execution of any kind   0
+shell invocation                0
+eval / new Function             0
+SQL built by interpolation      0
+file path derived from a request 0
+```
+
+Every query binds its parameters; every response is `JSON.stringify` or a static
+file. **No request field reaches an interpreter anywhere.**
+
+**Four sites carry the SHAPE and each is dispositioned, not waved past:**
+
+- **`src/scripts/gates.ts` — `sh -c` with a command from `.github/workflows/test.yml`.**
+  Real shell execution, and it is the tool's stated purpose: run locally exactly
+  what CI runs. The input is a repo-tracked file, so anyone who can change it can
+  already change CI. **No remote or agent-supplied input reaches it.** Accepted.
+- **`src/db/schema.ts` — `PRAGMA table_info(${table})` and `ALTER TABLE ${table}`.**
+  Both helpers are module-private and every call site is a string literal inside
+  the `MIGRATIONS` registry. **No runtime input path exists.** Accepted.
+- **`src/adapters/cli/commands/auth.ts` — `Bun.spawn(['open', authUrl])`.**
+  argv array, no shell. `authUrl` is built from local config plus a CLI-supplied
+  provider — the operator's own values on their own machine. Accepted.
+- **`src/admin/console.html` — `innerHTML`.** Every use is either `''`, a static
+  string, or a class name that is only ever `ok`/`err`. **All server data goes
+  through `textContent`.** Accepted.
+
+**And the adapter's remaining spawns:** five, all argv arrays with a fixed `git`
+verb. The sha passed to `merge-base` is an argument, never interpolated into a
+string. **Zero shell invocations remain anywhere outside the gates script.**
+
+> **The distinction that decides every one of these is argv-versus-shell.** A
+> fixed verb with arguments cannot be made to run something else; a string handed
+> to `sh -c` can. That is the whole difference between the five that stayed and
+> the one that was removed.
+
 ### Phase 5 — Federation (NOT STARTED, and absent from this file until now)
 
 Specified in `DESIGN.md` (Phase 5: Federation) and never given a ROADMAP

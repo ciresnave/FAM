@@ -121,7 +121,12 @@ Same format, one level up.
 
 Vouching and revoking are rare, so the passkey friction lands where it is cheap.
 
-### Peer account PUBLIC keys: in the project's git repository
+### Peer account PUBLIC keys: in git — but in WHOSE repository
+
+**Two schemes were considered. The second supersedes the first, and the first is
+kept because its failure is the reason the second is right.**
+
+#### Scheme A — the project's repository (SUPERSEDED)
 
 **CireSnave's proposal:**
 
@@ -200,6 +205,85 @@ does recovery from a compromised account key.** Git carries the routine
 traffic between those two events — which is the part that does not scale with
 humans, and is most of the lifetime of a key.
 
+#### Scheme B — one repository per account holder (CHOSEN)
+
+**CireSnave's refinement:**
+
+> *"Each account holder could add their public key to a separate repo that only
+> they control. That would mean their git account would have to be compromised
+> in order to compromise their key and, even then, no one else's key would be
+> endangered."*
+
+Correct, and stronger than stated.
+
+**It removes shared fate.** In a shared project repository, one compromised
+collaborator out of twenty can substitute all twenty keys. A single gatekeeper
+(CODEOWNERS pointing at one person) is worse in kind rather than better: that
+person's forge account becomes the master key for every identity in the project,
+they block rotation whenever unavailable, and their protection is a settings
+toggle a fork silently drops. **Both schemes recreate a party who must be
+trusted, inside a design whose whole point is that nobody is believed.**
+
+Per-account repositories have no shared file, no shared repository and no shared
+gatekeeper. **Compromising Bob's forge account yields Bob's key and nothing
+else.**
+
+> ⚠️ **AND IT INTRODUCES A SECOND FACTOR, which narrows the rotation hole above.**
+> Publishing a key requires the holder's FORGE account — a credential entirely
+> separate from their FAM account key.
+>
+> ```
+> thief holds the FAM KEY only    -> can forge messages, but CANNOT publish a
+>                                    rotation or suppress the real revocation.
+>                                    Alice revokes, peers pull, thief is cut off.
+> thief holds the FORGE ACCOUNT   -> can publish, but holds no old key to sign a
+>                                    valid rotation with.
+> ```
+>
+> **A full takeover needs BOTH.** Defence in depth rather than a cryptographic
+> guarantee — two independent credentials, not a proof — but it turns
+> "old-signs-new gives nothing" from a hole into a substantially narrowed one.
+
+**It also answers a question Scheme A could not:** which repository is
+authoritative when an agent works across several. **The holder's own, always.**
+Alice publishes once; every project she joins reads the same place.
+
+#### Where exactly: the forge's own per-user repository
+
+**CireSnave:** *"GitHub already has a repo for user information. My ciresnave
+GitHub account has a ciresnave repo."*
+
+**That is the right location and it removes the pointer problem.** GitHub's
+profile repository — `github.com/<user>/<user>` — is owned solely by that user,
+writable only by them, and **named deterministically**. Knowing the username
+gives the location by construction, so no directory, no pointer file and no
+lookup service is needed to find a key.
+
+⚠️ **But the CORE must not know this.** A protocol that hard-codes GitHub has
+learned what a forge is — the same concept-smuggling refused when a bare `cwd`
+key was rejected and when the durability check was moved out of the core. So:
+
+```
+CORE      stores an opaque location string. Never parses it, never fetches it.
+ADAPTER   knows the convention "github.com/<user>/<user>", and that other
+          forges and self-hosted git exist.
+```
+
+**Convention, not requirement.** It makes the common case need no configuration
+at all while leaving anyone who does not use GitHub — or who prefers a
+self-hosted remote — a location field that works identically.
+
+**What it costs, named rather than discovered:** trust moves onto forge-account
+security, which is the same class as email-account compromise and is **the
+holder's own risk rather than a shared one**; a verifier fetches N small
+repositories instead of one, which is cacheable; and a username change moves the
+conventional location, so the stored location must remain the authority rather
+than being re-derived from a name each time.
+
+**Unchanged by any of this:** first contact is still the out-of-band exchange.
+Nothing here tells Bob that a repository is *Alice's* — only that whoever
+controls it has been consistent.
+
 ### Revocation has a staleness window, and it needs two paths
 
 Git is pull, not push: a peer does not learn of a revocation until they fetch.
@@ -265,6 +349,15 @@ every previously signed statement is ambiguous.
   been given away for convenience.
 - **Key files in git without self-signatures.** That is the version where repo
   write access becomes identity forgery.
+- **A single gatekeeper approving all key changes.** It works mechanically and
+  recreates a party who must be trusted: a bottleneck when unavailable, a single
+  point of compromise whose forge account becomes the master key for every
+  identity in the project, and a protection that is a settings toggle a fork
+  drops silently.
+- **Keys for several account holders in one repository others can push to.**
+  Shared fate — one compromised collaborator substitutes everybody.
+- **A core that knows what GitHub is.** The conventional location belongs to the
+  adapter; the core stores an opaque string and never resolves it.
 - **Treating the out-of-band exchange as optional** once git distribution works.
   Git carries keys; it does not vouch for the first one.
 
@@ -276,8 +369,9 @@ every previously signed statement is ambiguous.
    staleness window is the deciding factor and it has not been measured.
 2. **Countersigned rotation.** Requiring N existing collaborators to sign a key
    rotation is the only mechanism discussed that defends account-key compromise
-   *cryptographically* rather than socially. It costs coordination on every
-   rotation. Undecided, and the deciding factor is project size.
+   *cryptographically* rather than socially. **Per-account repositories narrow
+   the need for it** by requiring a second, independent credential to publish, so
+   it may no longer be worth its coordination cost. Undecided.
 3. **Whether entity keys are vouched individually or by a wildcard** ("all
    agents of this account"), which interacts with how consent is expressed.
 4. **What a voucher and a revocation look like on the wire** — format, and where

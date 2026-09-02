@@ -55,8 +55,29 @@ beforeAll(() => {
 });
 
 describe('the schema carries an encryption key that FAM cannot invent', () => {
-  test('the version advanced', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(17);
+  test('the columns migration 17 adds are present', () => {
+    // ⚠️ THIS ASSERTED `CURRENT_SCHEMA_VERSION === 17` AND BROKE ON MIGRATION 18,
+    // which is the third hand-maintained version number this repo has grown.
+    // `schema.test.ts` kept five of them and was corrected the same way.
+    //
+    // The version number was never the property under test — migration 17's job
+    // is these two columns, and asserting the global version made every future
+    // migration edit this file for no reason. A test that must be updated by
+    // unrelated work is a test that will eventually be updated WITHOUT being
+    // read.
+    const entityCols = (
+      ctx.db.query('PRAGMA table_info(entities)').all() as Array<{ name: string }>
+    ).map((c) => c.name);
+    const messageCols = (
+      ctx.db.query('PRAGMA table_info(messages)').all() as Array<{ name: string }>
+    ).map((c) => c.name);
+
+    expect(entityCols).toContain('encryption_public_key');
+    expect(messageCols).toContain('sealed');
+    // Control: the readers work, so "contains" is a real check and not two
+    // empty lists that would contain nothing either way.
+    expect(entityCols).toContain('public_key');
+    expect(messageCols).toContain('text');
   });
 
   test('an entity that has never supplied a key reads NULL, not empty string', () => {

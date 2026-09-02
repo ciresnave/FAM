@@ -43,7 +43,15 @@ for (const [i, line] of lines.entries()) {
     continue;
   }
 
-  const run = line.match(/^\s*run:\s*(.*)$/);
+  // BOTH YAML forms. A step may be written as `run:` under a `- name:`, or
+  // inline as `- run:` with no name. This knew only the first, so
+  // `- run: bun install --frozen-lockfile` was silently skipped: the script
+  // reported "2 steps" against a workflow with three, and said nothing.
+  //
+  // A gate that omits a line it was meant to protect and still reports success
+  // is worse than no gate — and this one's whole premise is that it has no list
+  // of its own to drift. It drifted by construction.
+  const run = line.match(/^\s*-?\s*run:\s*(.*)$/);
   if (!run) continue;
 
   const command = run[1]!.trim();
@@ -77,11 +85,60 @@ if (steps.length === 0) {
   process.exit(1);
 }
 
+// VACUITY GUARD ON THE PARSER ITSELF.
+//
+// Counting the steps we extracted proves nothing about the ones we did not.
+// This counts step-looking lines by the crudest possible measure and refuses if
+// the real parser found fewer — so the next YAML form nobody anticipated aborts
+// the run instead of being quietly dropped, which is exactly what `- run:` did.
+//
+// Deliberately dumber than the parser and not sharing its regex: a second
+// implementation of the same logic would agree with it and prove nothing.
+const stepLookingLines = lines.filter(l => l.includes('run:')).length;
+if (steps.length < stepLookingLines) {
+  console.error(
+    `gates: ${WORKFLOW} has ${stepLookingLines} lines containing "run:" but only ` +
+      `${steps.length} parsed as steps. Refusing to run a partial gate — one that ` +
+      `silently omits a step reports success for work it never examined.\n` +
+      `       Teach the parser the missing form rather than relaxing this check.`
+  );
+  process.exit(1);
+}
+
+// PIPEFAIL, so an upstream failure in a pipeline cannot pass as success.
+//
+// `sh -c 'false | true'` exits 0 — the shell reports only the LAST command, so
+// a step like `generate | count` succeeds when the generator failed. No current
+// step is a pipeline (measured: three of three), but the instrument was blind
+// to the case, and a gate that cannot detect a defect if introduced is not a
+// gate against it.
+//
+// Probed rather than assumed: `set -o pipefail` is not POSIX and a strict `sh`
+// rejects it. If it is unavailable we say so loudly instead of running without
+// it — a guard that quietly downgrades itself is the shape this exists to stop.
+//
+// NOTE: GitHub Actions has the same blindness. Its default shell is `bash -e`
+// without pipefail, so a pipeline step masks upstream failure in CI too. Fixing
+// it here does not fix it there; that needs a `defaults.run.shell` on the
+// workflow, and it is recorded rather than assumed done.
+const pipefailProbe = await $`sh -c ${'set -o pipefail'}`.nothrow();
+const pipefailSupported = pipefailProbe.exitCode === 0;
+const pipefailPrefix = pipefailSupported ? 'set -o pipefail; ' : '';
+
+if (!pipefailSupported) {
+  console.warn(
+    'gates: this shell does not support `set -o pipefail`. A step written as a ' +
+      'pipeline will report success even when an upstream command fails. The steps ' +
+      'still run; their failure detection is weaker, and you are being told rather ' +
+      'than left to assume otherwise.\n'
+  );
+}
+
 console.log(`gates: ${steps.length} step(s) derived from ${WORKFLOW}\n`);
 
 for (const [n, step] of steps.entries()) {
   console.log(`── [${n + 1}/${steps.length}] ${step.name}: ${step.command}`);
-  const result = await $`sh -c ${step.command}`.nothrow();
+  const result = await $`sh -c ${pipefailPrefix + step.command}`.nothrow();
   if (result.exitCode !== 0) {
     console.error(`\ngates: FAILED at "${step.name}" (exit ${result.exitCode}).`);
     process.exit(result.exitCode);

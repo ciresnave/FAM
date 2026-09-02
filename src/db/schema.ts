@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -671,6 +671,43 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
        account_id, target_type, COALESCE(target_entity_id, ''),
        source_type, COALESCE(source_entity_id, ''), COALESCE(source_account_id, '')
      )`,
+  ],
+
+  17: [
+    // Entity encryption keys, and a discriminator saying what actually happened
+    // to each message.
+    //
+    // ⚠️ `encryption_public_key` IS NULLABLE AND CANNOT BE BACKFILLED. THAT IS
+    // THE DESIGN. An entity's X25519 private key belongs to the entity; FAM
+    // generating one on its behalf would mean FAM could read that entity's
+    // mail, which is the exact property `sealing.ts` exists to remove. NULL is
+    // therefore a real state with a real meaning — THIS ENTITY CANNOT RECEIVE
+    // SEALED MESSAGES YET — and not a row waiting to be filled in.
+    //
+    // Separate from `public_key`, which is the Ed25519 identity key. Two keys
+    // because Ed25519 cannot do ECDH, and the shortcut fails silently in the
+    // direction that matters: an Ed25519 public key IMPORTS as X25519 and
+    // DERIVES 32 PLAUSIBLE BYTES, while its own private half is refused. See
+    // `src/crypto/keys.ts`.
+    addColumnIfMissing('entities', 'encryption_public_key', 'TEXT'),
+
+    // ⚠️ NOT NULL DEFAULT 0, and the default is the TRUE answer for existing
+    // rows rather than a placeholder: messages written before this migration
+    // were not sealed.
+    //
+    // The reason this is a column and not an inference: "does this text look
+    // like an envelope?" is a guess, and a guess that answers wrong hands
+    // ciphertext back as a message body. That has already happened once in this
+    // codebase — `MessageEncryptionMismatchError` exists because turning the
+    // at-rest flag OFF over encrypted rows is SILENT and returns the raw
+    // envelope as text. A discriminator that can be wrong is worse than none,
+    // so this one is written by the send path, not deduced by the read path.
+    //
+    // It also forces the rollout question into the open. Because the key column
+    // is nullable, a sender can meet a recipient it cannot seal to; recording
+    // per-row what happened is what stops "encrypted unless it wasn't" from
+    // being indistinguishable from "encrypted".
+    addColumnIfMissing('messages', 'sealed', 'INTEGER NOT NULL DEFAULT 0'),
   ],
 };
 

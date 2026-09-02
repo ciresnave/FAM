@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 18;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -708,6 +708,49 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // per-row what happened is what stops "encrypted unless it wasn't" from
     // being indistinguishable from "encrypted".
     addColumnIfMissing('messages', 'sealed', 'INTEGER NOT NULL DEFAULT 0'),
+  ],
+
+  18: [
+    // Vouchers and revocations — account-signed records binding an entity to a
+    // public key.
+    //
+    // ⚠️ IT IS SAFE FOR THE RELAY TO HOLD THESE, and that is the point rather
+    // than a concession. A voucher is self-authenticating under the account
+    // key: FAM can store one and cannot alter one without producing a signature
+    // it has no key for. The relay is allowed to be the transport precisely
+    // because it is not trusted with the contents.
+    //
+    // ⚠️ WHAT IT CAN STILL DO IS WITHHOLD. A server that simply does not return
+    // a revocation leaves a peer trusting a key that was revoked, and NO
+    // SIGNATURE CHECK DETECTS AN OMISSION. Ordering is handled —
+    // `resolveEntityKey` is order-independent — but ABSENCE cannot be, by any
+    // purely local check. Short validity, a transparency log, or fetching from
+    // the holder's own repo would close it; none is built. This reduces the
+    // relay from FORGER to CENSOR, which is real and is not the whole job.
+    //
+    // ⚠️ NO UNIQUE CONSTRAINT ON (entity, sequence), DELIBERATELY. Two
+    // validly-signed records can share a sequence, the server cannot judge
+    // between them, and `resolveEntityKey` already breaks that tie
+    // deterministically. A uniqueness constraint here would make the server
+    // pick a winner BY INSERT ORDER — the exact defect fixed in `b139e3b`,
+    // moved down a layer where it would be harder to see.
+    //
+    // The signature IS the identity: two records with the same signature over
+    // the same bytes are the same record, so re-publishing is idempotent.
+    `CREATE TABLE IF NOT EXISTS vouchers (
+      signature TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('voucher', 'revocation')),
+      sequence INTEGER NOT NULL,
+      record TEXT NOT NULL,
+      stored_at TEXT DEFAULT (datetime('now'))
+    )`,
+    // Lookup is always "every record for this entity" — resolution needs the
+    // whole set, because the answer depends on which record ranks highest and
+    // a partial set can only produce a stale answer.
+    'CREATE INDEX IF NOT EXISTS idx_vouchers_entity ON vouchers(entity_id)',
+    'CREATE INDEX IF NOT EXISTS idx_vouchers_account ON vouchers(account_id)',
   ],
 };
 

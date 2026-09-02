@@ -11,6 +11,7 @@ import { cleanupStaleSessions, cleanupExpiredOAuthStates, cleanupExpiredInvitati
 import { ipRateLimiter, entityRateLimiter, getClientIp, RateLimitError } from './middleware/rateLimit';
 import { assignRequestId, getRequestId } from './middleware/requestId';
 import { RequestEntityTooLargeError, ValidationError } from '../types/errors';
+import { messageRetentionDays } from '../config';
 import { logger } from '../utils/logger';
 import { isClientVersionSupported, FAM_VERSION } from '../utils/versioning';
 import { DEFAULT_PORT } from '../config';
@@ -27,7 +28,8 @@ if (!SERVER_SECRET) {
 
 const ALLOWED_ORIGINS = process.env.FAM_ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
 const MAX_BODY_SIZE = parseInt(process.env.FAM_MAX_BODY_SIZE || '1048576', 10); // 1MB default
-const MESSAGE_RETENTION_DAYS = parseInt(process.env.FAM_MESSAGE_RETENTION_DAYS || '30', 10); // 30 days default
+// Zero by default: see messageRetentionDays() for the ruling and why it is a change.
+const MESSAGE_RETENTION_DAYS = messageRetentionDays();
 
 // Validate OAuth provider configuration (warn if none configured)
 const hasGoogleOAuth = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);

@@ -8,7 +8,8 @@ import { MessageSendService } from '../services/messageSend';
 import { PermissionChecker } from '../services/permissionChecker';
 import { generateKeyPair, generateEncryptionKeyPair, bufferToBase64 } from '../../crypto/keys';
 import { seal } from '../../crypto/sealing';
-import { signEnvelope, type SignedEnvelope } from '../../crypto/envelope';
+import { signEnvelope, signGroupEnvelope, type SignedEnvelope } from '../../crypto/envelope';
+import { sealToMany } from '../../crypto/groupSealing';
 
 // ============================================================================
 // The sealed path over WebSocket.
@@ -173,15 +174,61 @@ describe('WebSocket send_sealed', () => {
     expect(db.prepare('SELECT COUNT(*) as n FROM messages').get()).toEqual({ n: 0 });
   });
 
-  test('a sealed channel send is refused as unbuilt, not as malformed', async () => {
-    // Channels need one content key wrapped per recipient. A caller reading
-    // "must specify to" would think their frame was wrong.
+  test('a sealed CHANNEL send works over the socket', async () => {
+    // This test previously asserted "not supported yet" — the honest answer
+    // while channel wrapping was unbuilt. Now that it exists the assertion is
+    // replaced rather than deleted, because "the refusal message changed" and
+    // "the feature works" are different claims and only the second one is worth
+    // having. A stale test asserting an old refusal would have kept passing and
+    // quietly documented the feature as absent.
+    const aliceEncryption = await generateEncryptionKeyPair();
+    ctx.entities.setEncryptionKey(ALICE, bufferToBase64(aliceEncryption.publicKey));
+
+    const channel = ctx.channels.create('ws-room', ALICE, false);
+    ctx.channels.addMember(channel.id, ALICE, 'owner');
+    ctx.channels.addMember(channel.id, BOB, 'member');
+
+    const sealed = await sealToMany(
+      [
+        { entity: ALICE, publicKey: bufferToBase64(aliceEncryption.publicKey) },
+        { entity: BOB, publicKey: bufferToBase64(bobEncryption.publicKey) },
+      ],
+      'to the room'
+    );
+    const envelope = await signGroupEnvelope(bufferToBase64(aliceIdentity.privateKey), {
+      sender: ALICE,
+      channel: channel.id,
+      sentAt: new Date().toISOString(),
+      sequence: 1,
+      sealed,
+    });
+
     await wsManager.handleMessage(
       ws,
-      JSON.stringify({ type: 'send_sealed', channel: 'some-channel', envelope: await envelopeFor('x') })
+      JSON.stringify({ type: 'send_sealed', channel: channel.id, envelope })
     );
 
-    expect(lastSystemText()).toMatch(/not supported yet/i);
+    const ack = ws.sent.find((f) => f.type === 'ack');
+    expect(ack).toBeDefined();
+    const row = db
+      .prepare('SELECT sealed, text FROM messages WHERE id = ?')
+      .get(ack.message_id) as { sealed: number; text: string };
+    expect(row.sealed).toBe(1);
+    expect(row.text).not.toContain('to the room');
+  });
+
+  test('naming both "to" and "channel" is refused rather than resolved', async () => {
+    await wsManager.handleMessage(
+      ws,
+      JSON.stringify({
+        type: 'send_sealed',
+        to: BOB,
+        channel: 'some-channel',
+        envelope: await envelopeFor('x'),
+      })
+    );
+
+    expect(lastSystemText()).toMatch(/not both/i);
   });
 
   test('an envelope disagreeing with the routing is refused, and the error reaches the client', async () => {

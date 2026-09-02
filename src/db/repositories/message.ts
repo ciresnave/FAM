@@ -101,14 +101,17 @@ export class MessageRepository {
     fromEntityId: EntityId,
     channelId: ChannelId,
     storedText: string,
-    plaintext: string
+    plaintext: string,
+    // REQUIRED, no default — same reason as insertDirectMessage: a default is a
+    // way to take the unsealed path without ever naming it.
+    opts: { sealed: boolean }
   ): Message {
     const stmt = this.db.prepare(`
-      INSERT INTO messages (from_entity, channel_id, text)
-      VALUES (?, ?, ?)
+      INSERT INTO messages (from_entity, channel_id, text, sealed)
+      VALUES (?, ?, ?, ?)
     `);
 
-    const result = stmt.run(fromEntityId, channelId, storedText);
+    const result = stmt.run(fromEntityId, channelId, storedText, opts.sealed ? 1 : 0);
     const messageId = result.lastInsertRowid as number;
 
     // Fan out to the members as they are AT SEND TIME, excluding the sender.
@@ -132,7 +135,8 @@ export class MessageRepository {
       fromEntityId,
       channelId,
       await this.prepareStoredText(text),
-      text
+      text,
+      { sealed: false }
     );
   }
 

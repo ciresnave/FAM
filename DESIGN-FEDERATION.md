@@ -9,6 +9,48 @@ flattening the conversation into a single voice.
 
 ---
 
+## ⚠️ The one sentence this document exists for
+
+**Every signature check in FAM today terminates at a value the server controls.**
+
+`entities.public_key` is a column in the server's own database, served to peers
+via `/entities/list` and verified against by the server itself —
+`messageSend.ts` calls `verifyEnvelope(sender.public_key, …)`. **A malicious
+home server needs nobody's private key. It publishes its own public key for an
+entity and forges freely.** The victim's key is untouched, perfectly safe, and
+irrelevant, because nobody was ever checking against it.
+
+**An INVALID key would fail verification and be noticed. A VALID key the server
+substituted is undetectable.** That asymmetry is the whole problem, and it is
+the same shape as the creation-time finding below: *the dangerous version is
+the one that looks correct.*
+
+> ⚠️ **AND THE WRONG FIX LOOKS FINISHED. A voucher chain rooted in an account
+> key that FAM also serves passes every signature check, reads as a completed
+> federation trust model, and defends against nothing the relay does — more
+> signatures, same trust root. VOUCHERS WITHOUT AN ANCHOR THE RELAY CANNOT
+> WRITE TO SOUND LIKE A FIX AND ARE NOT ONE.**
+>
+> The anchor is the account holder's own forge repository. That is not a
+> storage convenience; **it is the only link in the chain the relay cannot
+> rewrite**, and it is the reason the two-tier key model is worth building
+> rather than a way of signing more things.
+
+⚠️ **The anchor is currently REAL BUT NOT VERIFIABLE, which is a better position
+than today and still not a checkable one.** A peer that fetches an account key
+from a repo has removed the relay from the trust path — but cannot yet tell
+that the key it holds *came from there*, nor notice when the answer changes.
+Closing that needs pinning-on-first-use with change alerts, a transparency log,
+or at minimum a fingerprint the holder publishes out of band. **None is built.
+Recorded so "we use git" is not mistaken for "it is checkable".**
+
+**Built so far** (`src/crypto/voucher.ts`): the voucher and revocation records,
+their signing and verification under an account key the caller must supply, and
+sequence-based resolution. **Not built:** anything that fetches an account key,
+the wire format, storage, or the forge-repo layout.
+
+---
+
 ## What federation is for
 
 **Many account holders whose agents work together on shared projects.**

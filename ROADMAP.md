@@ -847,20 +847,62 @@ there.
 
 ### Phase 7 — Messaging Model (buildable items, none started)
 
-Derived from `DESIGN-MESSAGING.md`. **Ordering is with the portfolio PM** — the
-items have real dependencies AND differing external costs, and the costs are
-visible from the portfolio rather than from here.
+Derived from `DESIGN-MESSAGING.md`.
+
+> **ORDER, ruled by the portfolio PM 2026-09-02: 7.3 → 7.1 → 7.2 → 7.4.**
+> 7.5 unscheduled.
+
+**This reverses my draft (`7.1 → 7.2 → 7.3 → 7.4`) and the correction is worth
+keeping.** I noted that 7.3 is independent of 7.1 and then did not use it:
+because it is independent, **putting it first costs the reference chain nothing**
+— 7.1 starts immediately after. There was no sequencing argument against it,
+only the pull of building the elegant thing first.
+
+**And the deciding cost was one I could not see from inside this repo.**
+Restart-orphaning is portfolio-wide, and one restart produced it three ways at
+once: two fuel lanes unallocated while the architect believed otherwise; PR #29
+approved and unmerged for four days because its author was killed; and 17 blank
+summaries in which a live lane and a dead one are identical. **The architect
+found their own unallocated lanes only because they re-checked task-against-live-
+peer-ID rather than working from memory — a check nothing surfaced.**
+
+> **A cost with a workaround and a cost with none are not comparable on size
+> alone.** 7.2's cost is real and bounded and has a human fix available today
+> (CireSnave telling vulkane directly). **7.3's cost has no workaround at all** —
+> nothing detects an orphaned task. A blocker whose fix is one human sentence
+> should not set build order.
+
+**7.1 before 7.2 and 7.4 stands** — a ruling is a reference to a record and a
+measurement is a reference with a construct and a mode, so building either first
+means building the mechanism inside it and generalising later.
+
+### 7.1 open question — RULED: the durability check lives in the ADAPTER
+
+**The core must not run `git`.** The argument is FAM's own test: the core flags
+`weird.tenant_slug` exactly as readily as `mcp.cwd`, and that test exists because
+it is the property keeping filesystem knowledge out of the protocol. **A core
+that resolves a repository has learned what a repository is** — the same
+concept-smuggling refused when a bare `cwd` key was rejected. The core compares
+and carries; it does not resolve.
+
+So the adapter checks `compare...main` and the core stores the **result**, plus
+what was checked and when.
+
+⚠️ **And the stored result is itself a MEASUREMENT, not a fact.** `durable: true`
+was true at the moment the adapter looked. By this design's own two-mode split it
+is **reproducible, not verifiable**, and therefore needs the ref it was checked
+at — a `durable` flag without one is precisely the unverifiable self-attestation
+the predicate exists to replace.
 
 **7.1 — Typed reference (`message_refs`).** The shared mechanism the other items
 rest on. A namespaced, opaque-to-the-core reference attached to a message:
 `{kind, ...fields, mode}` where `mode` is `verifiable` or `reproducible`. FAM
 carries and compares; it never resolves or interprets. Migration for the table,
 a send-path field, adapter surface, console display.
-- **`durable` for `git.ref` must be CHECKED AT SEND TIME.** Squash-merge orphans
-  PR-head SHAs, so a sender-asserted flag is one more unverifiable claim. This is
-  the only part that requires FAM to talk to something outside itself, and it may
-  belong in the adapter rather than the core — **open question, decide before
-  building.**
+- **`durable` for `git.ref` must be CHECKED AT SEND TIME** — squash-merge orphans
+  PR-head SHAs, so a sender-asserted flag is one more unverifiable claim.
+  **RULED: the check lives in the adapter, the core stores the result with the
+  ref it was checked at.** See the ruling above.
 
 **7.2 — Rulings as records.** A ruling is stored and QUERIED by the grantee, not
 relayed as a claim. Needs: a `rulings` table (granter account, scope, body,

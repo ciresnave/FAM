@@ -503,6 +503,81 @@ export class EntityRepository {
   }
 
   // --------------------------------------------------------------------------
+  // Encryption keys (X25519, for sealed messages)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Record an entity's X25519 public key, so others can seal messages to it.
+   *
+   * SEPARATE FROM `public_key`, which is the Ed25519 identity key and is set at
+   * creation. Ed25519 signs and cannot do ECDH; reusing it would produce
+   * ciphertext the recipient can never open, because an Ed25519 public key
+   * imports as X25519 and derives 32 plausible bytes while its own private half
+   * is refused. See `src/crypto/keys.ts`.
+   *
+   * FAM CANNOT GENERATE THIS ON THE ENTITY'S BEHALF. The private half belongs
+   * to the entity; a server that made the pair could read the mail, which is
+   * the property sealing exists to remove. So the column stays NULL until an
+   * entity supplies one, and NULL means "cannot receive sealed messages yet".
+   */
+  setEncryptionKey(id: EntityId, publicKeyBase64: string): void {
+    // Size is checked HERE rather than at the crypto call, because a key stored
+    // at the wrong length fails much later, inside someone else's send, on a
+    // message that is already gone. X25519 public keys are exactly 32 bytes.
+    let decoded: Buffer;
+    try {
+      decoded = Buffer.from(publicKeyBase64, 'base64');
+    } catch {
+      throw new ValidationError('Encryption public key must be base64.');
+    }
+
+    // Buffer.from is permissive: it skips characters outside the base64
+    // alphabet rather than throwing, so garbage decodes to something short
+    // instead of failing. Re-encoding and comparing is what actually detects
+    // it — the length check below would pass for a long enough string of
+    // punctuation.
+    if (decoded.toString('base64').replace(/=+$/, '') !== publicKeyBase64.replace(/=+$/, '')) {
+      throw new ValidationError('Encryption public key must be valid base64.');
+    }
+
+    if (decoded.length !== 32) {
+      throw new ValidationError(
+        `Encryption public key must be 32 bytes (X25519); got ${decoded.length}.`
+      );
+    }
+
+    this.db
+      .prepare('UPDATE entities SET encryption_public_key = ? WHERE id = ?')
+      .run(publicKeyBase64, id);
+  }
+
+  /** The stored X25519 public key, or null if the entity has never supplied one. */
+  getEncryptionKey(id: EntityId): string | null {
+    const row = this.db
+      .prepare('SELECT encryption_public_key FROM entities WHERE id = ?')
+      .get(id) as { encryption_public_key: string | null } | undefined;
+
+    return row?.encryption_public_key ?? null;
+  }
+
+  /**
+   * Can a message to this entity be sealed?
+   *
+   * A QUESTION WITH AN ANSWER, rather than a null check repeated at every call
+   * site. The point is that a sender must HAVE an answer before it can choose a
+   * path, so falling back to unsealed is a decision made somewhere rather than
+   * a default that happens everywhere. "Encrypted unless it wasn't" reads as
+   * "encrypted" at every site that does not look.
+   *
+   * A missing entity answers `false`, the same as one with no key. A caller
+   * that could tell those apart would hold an existence oracle for entities in
+   * other accounts, which the rest of this codebase deliberately refuses.
+   */
+  canReceiveSealed(id: EntityId): boolean {
+    return this.getEncryptionKey(id) !== null;
+  }
+
+  // --------------------------------------------------------------------------
   // Helpers
   // --------------------------------------------------------------------------
 

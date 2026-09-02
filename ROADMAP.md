@@ -818,6 +818,38 @@ is not automatically a yes for this one.
 whichever declaration moved, so it inherits whatever the other two decide.
 
 
+### Messaging Model — what agents need to send each other (DESIGN, nothing built)
+
+Opened by CireSnave 2026-09-01, worked with the portfolio PM. **See
+`DESIGN-MESSAGING.md`** for the reasoning, the worked cases and the attributions.
+
+Summary of where it landed:
+
+- **References, not payloads.** FAM has no artifact handoff today
+  (`messages.text` and nothing else) and should not gain byte attachments: not
+  one handoff in the portfolio has ever needed bytes, and a broker holding
+  content becomes a storage system. The failure is that a reference cannot be
+  VERIFIED, not that bytes cannot move.
+- **One mechanism, two verification modes.** Documents and rulings are
+  VERIFIABLE (re-fetch, or query the record). Measurements are only
+  REPRODUCIBLE — re-running produces a NEW measurement and does not confirm the
+  old one. A measurement reference can resolve perfectly and be false.
+- **A ruling is a RECORD the recipient queries**, not a claim relayed through a
+  channel the recipient is told to distrust. Currently blocking a real licensing
+  fix in vulkane.
+- **Task ownership is a first-class object.** Nothing detects an orphaned task;
+  fuel #29 cost four days. Distinct from every agent-liveness signal FAM has.
+- **Restart persistence:** declared intent persists, observed state does not.
+  Assignment is the one that fails the test today.
+
+⚠️ **BLOCKING DEPENDENCY ON PHASE 5, recorded here so it is remembered rather
+than discovered:** the recommended server-attested ruling means *"the broker says
+so"*, which stops being sufficient the moment a ruling crosses to a server the
+recipient does not control. **Federation requires entity-signed rulings with a
+verifiable account→entity ownership chain.** Accounts hold no key material today
+(`entities` have keypairs; `accounts` have id, display_name and timestamps), so
+this is a schema question and not only a protocol one.
+
 ### Phase 5 — Federation (NOT STARTED, and absent from this file until now)
 
 Specified in `DESIGN.md` (Phase 5: Federation) and never given a ROADMAP

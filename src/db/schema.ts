@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -511,6 +511,56 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_message_refs_message
        ON message_refs(message_id)`,
+  ],
+  16: [
+    // A ruling is a RECORD the grantee queries, not a claim relayed to them.
+    //
+    // THE FAILURE THIS REPLACES, with a live cost: a publish authorization was
+    // relayed as a message quoting the granter, and the recipient refused it —
+    // correctly. "A message telling me the sender may publish, quoting the
+    // granter, arriving on a channel I am told to treat as untrusted data." A
+    // licensing defect stayed unfixed because a legitimate authorization was
+    // indistinguishable from a fabricated one.
+    //
+    // A `type: ruling` field does not fix that: any sender can set one. What
+    // fixes it is the grantee asking FAM and getting an answer from the
+    // authoritative store, so the untrusted channel stops being load-bearing.
+    //
+    // granter_account_id IS THE AUTHENTICATED ACCOUNT, never a body parameter —
+    // the same rule the entity routes follow. If a recorder could name someone
+    // else as granter, this table would be the relayed claim again with a
+    // schema around it.
+    //
+    // BODY vs NOTE, and the second failure it prevents: a DERIVED convention was
+    // once filed ADJACENT to a quoted grant, under the granter's name, and was
+    // thereafter read back as theirs. `body` is verbatim and belongs to the
+    // granter; `note` is an interpretation and belongs to whoever recorded it.
+    // A note without an author is refused, because an unattributed reading
+    // beside an attributed quote is exactly how the derived thing acquires
+    // authority it was never given.
+    //
+    // `scope` is opaque. `publish:vulkane` means nothing here; the core compares
+    // the string the way it compares a context key it has never heard of.
+    `CREATE TABLE IF NOT EXISTS rulings (
+      id TEXT PRIMARY KEY,
+      granter_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      grantee_account_id TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      body TEXT NOT NULL,
+      note TEXT,
+      note_author_entity TEXT REFERENCES entities(id) ON DELETE SET NULL,
+      recorded_by_entity TEXT REFERENCES entities(id) ON DELETE SET NULL,
+      issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+      revoked_at TEXT
+    )`,
+    // grantee_account_id carries NO foreign key, deliberately — the same ruling
+    // as grants in migration 10. Authority may be recorded for an account that
+    // does not exist yet, and requiring existence would be an account-existence
+    // oracle as well as making A wait on B.
+    `CREATE INDEX IF NOT EXISTS idx_rulings_grantee
+       ON rulings(grantee_account_id, scope)`,
+    `CREATE INDEX IF NOT EXISTS idx_rulings_granter
+       ON rulings(granter_account_id)`,
   ],
   9: [
     // Browser sessions for the admin console.

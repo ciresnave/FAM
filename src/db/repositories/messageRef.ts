@@ -14,6 +14,7 @@
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'crypto';
 import { ValidationError } from '../../types/errors';
+import { assertWithinLimit } from '../../types/validation';
 
 /**
  * How a recipient can check a reference.
@@ -90,86 +91,109 @@ export class MessageRefRepository {
    * then threw, leaving a message the caller believed was never sent.
    */
   validate(input: MessageRefInput): void {
-    const { kind, mode, payload } = input;
+    this.assertShape(input);
+    this.assertModeRequirements(input);
 
-    // Namespaced, for the reason context keys are: a bare `ref` would be FAM
-    // asserting a concept it does not have.
-    if (typeof kind !== 'string' || !kind.includes('.') || kind.startsWith('.') || kind.endsWith('.')) {
-      throw new ValidationError(
-        `Reference kind "${kind}" is not namespaced. Use "<namespace>.<kind>", ` +
-          'e.g. "git.ref". FAM does not interpret the namespace; it exists so the ' +
-          'core is never asked to own a concept that belongs to an adapter.'
-      );
-    }
+    const encoded = JSON.stringify(input.payload);
+    assertWithinLimit(encoded, REF_PAYLOAD_MAX, {
+      unit: 'bytes',
+      field: 'Reference payload',
+      why:
+        'a partial payload would satisfy the mode requirements with the fields that ' +
+        'survived and stay silent about the rest.',
+    });
+  }
 
-    if (!MODES.includes(mode)) {
-      throw new ValidationError(
-        `Reference mode must be one of ${MODES.join(', ')}. ` +
-          'The mode says how a recipient can CHECK this, and there is no third answer: ' +
-          'either they can re-fetch the thing, or they can only re-run the observation.'
-      );
-    }
+  /** Structure only — three independent rules, each readable on its own. */
+  private assertShape(input: MessageRefInput): void {
+    this.assertNamespacedKind(input.kind);
+    this.assertKnownMode(input.mode);
+    this.assertStringPayload(input.payload);
+  }
 
+  /**
+   * A kind must carry a namespace.
+   *
+   * For the reason context keys do: a bare `ref` would be FAM asserting a
+   * concept it does not have. Written as prose rather than an angle-bracket
+   * template — a literal that looks like markup is one a static analyser flags
+   * and a future reader has to stop and think about.
+   */
+  private assertNamespacedKind(kind: string): void {
+    const ok =
+      typeof kind === 'string' && kind.includes('.') && !kind.startsWith('.') && !kind.endsWith('.');
+    if (ok) return;
+
+    throw new ValidationError(
+      `Reference kind "${kind}" is not namespaced. Use a namespace, a dot, then a ` +
+        'kind — for example "git.ref". FAM does not interpret the namespace; it ' +
+        'exists so the core is never asked to own a concept belonging to an adapter.'
+    );
+  }
+
+  private assertKnownMode(mode: RefMode): void {
+    if (MODES.includes(mode)) return;
+
+    throw new ValidationError(
+      `Reference mode must be one of ${MODES.join(', ')}. The mode says how a ` +
+        'recipient can CHECK this, and there is no third answer: either they can ' +
+        're-fetch the thing, or they can only re-run the observation.'
+    );
+  }
+
+  private assertStringPayload(payload: Record<string, string>): void {
     if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
       throw new ValidationError('Reference payload must be an object of string fields');
     }
 
     for (const [key, value] of Object.entries(payload)) {
-      if (typeof value !== 'string') {
-        throw new ValidationError(
-          `Reference payload field "${key}" is ${typeof value}; only strings are stored. ` +
-            'The core compares these and never interprets them.'
-        );
-      }
+      if (typeof value === 'string') continue;
+      throw new ValidationError(
+        `Reference payload field "${key}" is ${typeof value}; only strings are stored. ` +
+          'The core compares these and never interprets them.'
+      );
     }
+  }
 
-    // ---- Requirements bind to the MODE, not the kind ----
+  /**
+   * The requirements that bind to the MODE rather than the kind.
+   *
+   * Separated because that is the load-bearing idea: the core does not know what
+   * a measurement IS, only that anything claiming to be reproducible must say
+   * when, as whom, and over what. Keeping it in its own method means the rule
+   * can be read without reading the shape checks around it.
+   */
+  private assertModeRequirements(input: MessageRefInput): void {
+    const { mode, payload } = input;
 
-    if (mode === 'verifiable') {
+    if (mode === 'verifiable' && !payload.digest) {
       // Without something to compare, the recipient has a name and no way to
       // check they got the thing the sender meant — the exact failure a typed
       // reference replaces.
-      if (!payload.digest) {
-        throw new ValidationError(
-          'A verifiable reference must carry a `digest` the recipient can compare ' +
-            'after re-fetching (a commit sha, a content hash, an etag). Without one ' +
-            'it is a name, and a name is what "see DESIGN.md" already was.'
-        );
-      }
-    }
-
-    if (mode === 'reproducible') {
-      const missing = ['construct', 'taken_at', 'taken_as'].filter(f => !payload[f]);
-      if (missing.length > 0) {
-        throw new ValidationError(
-          `A reproducible reference must carry ${missing.join(', ')}. ` +
-            'construct: what the observation ranged over — "1047 characters" is ' +
-            'meaningless without it, and correct arithmetic over an unstated subject ' +
-            'is the most common way a right number misleads. ' +
-            'taken_at: a ref the reader can count forward from, not a wall clock — ' +
-            'old and wrong are different facts. ' +
-            'taken_as: the identity it was observed under. GET on a protected branch ' +
-            'returns 404 to a non-admin and 404 to an admin with opposite meanings, ' +
-            'so after any privilege change a stored absence without this is ' +
-            'unverifiable rather than merely stale.'
-        );
-      }
-    }
-
-    const encoded = JSON.stringify(payload);
-    // Measured in the unit it REPORTS. This compared JavaScript string
-    // characters while saying "bytes", so a multibyte payload passed a bound it
-    // exceeded — wrong in the permissive direction, which is the one that does
-    // not announce itself. Same defect as a correct count over an unstated
-    // construct, in a limit rather than a relay.
-    const byteLength = new TextEncoder().encode(encoded).byteLength;
-    if (byteLength > REF_PAYLOAD_MAX) {
       throw new ValidationError(
-        `Reference payload is ${byteLength} bytes; the limit is ${REF_PAYLOAD_MAX}. ` +
-          'Refused rather than trimmed: a partial payload would satisfy the mode ' +
-          'requirements with fields that survived and stay silent about the rest.'
+        'A verifiable reference must carry a `digest` the recipient can compare ' +
+          'after re-fetching (a commit sha, a content hash, an etag). Without one ' +
+          'it is a name, and a name is what "see DESIGN.md" already was.'
       );
     }
+
+    if (mode !== 'reproducible') return;
+
+    const missing = ['construct', 'taken_at', 'taken_as'].filter(f => !payload[f]);
+    if (missing.length === 0) return;
+
+    throw new ValidationError(
+      `A reproducible reference must carry ${missing.join(', ')}. ` +
+        'construct: what the observation ranged over — "1047 characters" is ' +
+        'meaningless without it, and correct arithmetic over an unstated subject ' +
+        'is the most common way a right number misleads. ' +
+        'taken_at: a ref the reader can count forward from, not a wall clock — ' +
+        'old and wrong are different facts. ' +
+        'taken_as: the identity it was observed under. A GET on a protected branch ' +
+        'returns 404 to a non-admin and 404 to an admin with opposite meanings, so ' +
+        'after any privilege change a stored absence without this is unverifiable ' +
+        'rather than merely stale.'
+    );
   }
 
   private mapRow(row: any): MessageRef {

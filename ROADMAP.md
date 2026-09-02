@@ -845,7 +845,7 @@ Summary of where it landed:
 **Buildable items are Phase 7 below**, with the Phase 5 precondition attached
 there.
 
-### Phase 7 — Messaging Model (buildable items, none started)
+### Phase 7 — Messaging Model (7.1, 7.2, 7.3 DONE; 7.4 next; 7.5 unscheduled)
 
 Derived from `DESIGN-MESSAGING.md`.
 
@@ -938,7 +938,32 @@ a send-path field, adapter surface, console display.
   **RULED: the check lives in the adapter, the core stores the result with the
   ref it was checked at.** See the ruling above.
 
-**7.2 — Rulings as records.** A ruling is stored and QUERIED by the grantee, not
+**7.2 — Rulings as records. DONE** (migration v16). `rulings` table,
+`POST /rulings/check` for the grantee, admin create/list/revoke, `fam_check_ruling`
+in the MCP adapter, and an **Authority** tab in the console.
+- **The granter is the AUTHENTICATED account and is never read from a body** —
+  the same rule the entity routes follow. A recorder who could name someone else
+  as granter would turn the table back into the relayed claim it replaces.
+- **`/rulings/check` is the feature in one call:** an agent asks FAM whether its
+  own account holds an authority, instead of believing a message that says so.
+  **A caller may only ask about authority granted TO them** — any pair would make
+  this a directory of who trusts whom.
+- **`granted: false` is an ANSWER, not a 404.** A caller that cannot tell "no
+  such authority" from "the lookup failed" is back where it started.
+- **BODY vs NOTE, and the second failure it prevents.** A derived convention was
+  once filed ADJACENT to a quoted grant, under the granter's name, and thereafter
+  read back as theirs. `body` is verbatim and the granter's; `note` is an
+  interpretation and carries its author. **A note without an author is refused**,
+  because an unattributed reading beside an attributed quote is exactly how the
+  derived thing acquires authority nobody gave it. The console renders them
+  together — mutation-verified: dropping the author reddens that test alone.
+- **Revocation does not delete.** That authority was once given stays part of the
+  record; a grantee who acted while it stood needs it to still be there.
+- `grantee_account_id` carries **no foreign key**, matching migration 10 —
+  authority may be recorded for an account that does not exist yet, and requiring
+  existence would be an existence oracle as well as making A wait on B.
+
+**7.2 — Rulings as records (original scope).** A ruling is stored and QUERIED by the grantee, not
 relayed as a claim. Needs: a `rulings` table (granter account, scope, body,
 issued_at, revoked_at), a create path behind account auth, a lookup the grantee
 can call, and console surfaces. **Server-attested; see the Phase 5 precondition

@@ -1,0 +1,40 @@
+---
+# Codacy configuration.
+#
+# CLAUDE.md is excluded, and the reasoning belongs here rather than in that file
+# — which is the whole point.
+#
+# THE LOOP. CLAUDE.md is instructions to an agent, not prose for a human reader.
+# Codacy's documentation-style rules ("absolute rule without escape hatch",
+# "undefined acronym", "instruction starts with an ambiguous pronoun") are aimed
+# at human-facing documentation, and two of them are wrong about this subject in
+# a way that cannot be argued down by writing more carefully:
+#
+#   Two rules in that file are ABSOLUTE ON PURPOSE. "Always say under whose key"
+#   exists because a module named `message-encryption.ts` was read as providing
+#   confidentiality from the relay for as long as it existed — its file name
+#   matched the requirement and nothing forced the question. An escape hatch on
+#   that rule reintroduces exactly the defect it was written for. Likewise "do
+#   not reach for the Ed25519 to X25519 conversion": that shortcut is not
+#   wrong-in-most-cases, it is wrong-with-a-passing-smoke-test, and a rule with
+#   an escape hatch gets escaped by whoever is trying to avoid a migration —
+#   the exact person it addresses.
+#
+# ⚠️ AND THE DISPOSITION FED THE LINT. Writing the justification INTO the file
+# added two new findings: the explanation opened with a pronoun the lint calls
+# ambiguous, and it used a capitalised word the lint read as an undefined
+# acronym. Findings went 3 to 5. Every sentence explaining why a rule is
+# absolute is another sentence in a file that objects to absolutes, so a
+# disposition written into the linted file HAS NO FIXED POINT.
+#
+# WHAT THIS COSTS, stated so it is a decision and not a convenience: genuine
+# issues in CLAUDE.md now go unflagged. Accepted, because the failure mode in
+# the other direction is worse — a rule file that a style lint keeps softening
+# gets weaker every time someone satisfies it, and nothing measures that.
+#
+# The two fair findings were fixed on their merits rather than excluded away:
+# the ambiguous pronoun now names its subject, and the capitalised emphasis is
+# now italics. This exclusion is for the two that are right about the grammar
+# and wrong about the artifact.
+exclude_paths:
+  - 'CLAUDE.md'

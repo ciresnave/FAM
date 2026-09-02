@@ -103,11 +103,12 @@ been removed from both checkouts — every configured remote now resolves.
   the relay. A claim that "messages are encrypted" is ambiguous between a
   property FAM has and one it did not have until `33dd549`.
 
-  *That rule is absolute on purpose, and a hedged version would reintroduce the
-  defect it was written for.* `message-encryption.ts` was read as providing
-  confidentiality from the relay for as long as it existed, because its NAME
-  matches that requirement and nothing forced the question. "Usually say under
-  whose key" leaves exactly the gap the omission already walked through once.
+  *The word "always" is deliberate, and a hedged version would reintroduce the
+  defect the rule was written for.* `message-encryption.ts` was read as providing
+  confidentiality from the relay for as long as it existed, because its *file
+  name* matches that requirement and nothing forced the question. "Usually say
+  under whose key" leaves exactly the gap the omission already walked through
+  once.
 
   **Entity identity keys are Ed25519 and cannot encrypt**, which is why the
   X25519 key exists rather than being reused. Do not reach for the Ed25519→

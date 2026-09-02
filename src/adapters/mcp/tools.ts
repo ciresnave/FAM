@@ -43,6 +43,24 @@ export const FAM_TOOLS = [
           description: 'The message text to send',
         },
       },
+        measure: {
+          type: 'object' as const,
+          description:
+            'Optional. Attach a MEASUREMENT by giving the COMMAND that produces it. ' +
+            'The adapter runs it and records the command verbatim as the construct — ' +
+            'you cannot supply your own wording for what was counted, and that is the ' +
+            'point: "48 vectors mentioning NaN" becoming "48 NaN vectors" is the ' +
+            'defect this prevents. It also makes the reference genuinely reproducible, ' +
+            'because a recipient can re-run a command and cannot re-run a description. ' +
+            'A command that FAILS attaches nothing and tells you so — "could not ' +
+            'measure" is not "measured zero".',
+          properties: {
+            command: {
+              type: 'string' as const,
+              description: 'The command whose output IS the measurement, e.g. `rg -c "NaN" corpus.json`',
+            },
+          },
+        },
         git_ref: {
           type: 'object' as const,
           description:

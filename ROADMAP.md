@@ -845,7 +845,7 @@ Summary of where it landed:
 **Buildable items are Phase 7 below**, with the Phase 5 precondition attached
 there.
 
-### Phase 7 — Messaging Model (7.1, 7.2, 7.3 DONE; 7.4 next; 7.5 unscheduled)
+### Phase 7 — Messaging Model (7.1–7.4 DONE; 7.5 unscheduled)
 
 Derived from `DESIGN-MESSAGING.md`.
 
@@ -1009,7 +1009,35 @@ PR #29, four days.
 - Persists across restart by the test in DESIGN-MESSAGING: a human should not
   have to re-tell a coordinator what its lanes were doing.
 
-**7.4 — Measurement provenance.** `{value, construct, ref, taken_at}` as a
+**7.4 — Measurement provenance. DONE.** No migration — 7.1 already built the
+mechanism and `reproducible` already enforces `construct` / `taken_at` /
+`taken_as`. What remained was the adapter surface, and the PM's framing decided
+its shape:
+
+> `taken_as` is your unit argument. A measurement whose construct and whose
+> STATED construct can drift apart is the identical defect one level up.
+
+- **You supply the COMMAND, not the number and a description of it.** The adapter
+  runs it and records the command **verbatim** as the construct. **There is no
+  parameter for a caller's own wording**, which is what makes drift impossible
+  rather than discouraged. *"48 vectors mentioning NaN"* becoming *"48 NaN
+  vectors"* is the defect; a per-function line count that swept the next
+  function's doc comments is another; `86/208` reported against a rule written
+  about `86/143` is a third. **The number was right every time.**
+- **This also makes `reproducible` mean what it claimed.** A recipient cannot
+  re-run prose. They can re-run a command. **A reproducible reference whose
+  construct is a description was never actually reproducible** — 7.1 defined the
+  mode correctly and the adapter surface is what makes it true.
+- **A failed command attaches NOTHING and says so.** "Could not measure" and
+  "measured zero" are different facts — the same distinction the durability
+  check had to learn. **An empty stdout with exit 0 IS a measurement** and is
+  kept, because discarding it alongside the failures would erase exactly the
+  finding a negative control exists to produce.
+- Same fix as the unit argument on `assertWithinLimit`: the defect was never a
+  wrong choice, it was that **the count and the statement of the count were
+  independently specifiable.**
+
+**7.4 — Measurement provenance (original scope).** `{value, construct, ref, taken_at}` as a
 `reproducible` reference. `construct` is the load-bearing field — four incidents
 in one day where the arithmetic was correct and the subject it ranged over was
 never stated. Staleness must be a **checkable ref**, not a wall clock: "taken at

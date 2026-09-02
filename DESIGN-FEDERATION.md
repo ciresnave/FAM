@@ -438,6 +438,26 @@ every previously signed statement is ambiguous.
    agents of this account"), which interacts with how consent is expressed.
 4. **What a voucher and a revocation look like on the wire** — format, and where
    the sequence number lives.
-5. **Whether messages are also encrypted**, not merely signed. Signing answers
-   authenticity; confidentiality from the relay is a separate decision and is
-   not required by anything above.
+5. ~~**Whether messages are also encrypted**, not merely signed.~~ **RULED by
+   CireSnave 2026-09-02: encrypt them.** *"Is there a reason to not encrypt
+   messages? If not, encrypt them."* There was no reason that survived looking,
+   but three measured facts made it an increment rather than a setting.
+
+   **What already existed was not what was asked for.** `message-encryption.ts`
+   encrypts at rest under a key derived from `FAM_SERVER_SECRET` — **the server
+   reads every message.** That defends a stolen disk and gives no
+   confidentiality from the relay at all. It stays; the two are orthogonal.
+   ⚠️ **But a component whose NAME matches the requirement and whose BEHAVIOUR
+   does not is worse than an absent one, because it silences the question.**
+   Anything claiming messages are encrypted must say *under whose key*.
+
+   **Entity keys could not encrypt.** Ed25519 signs; WebCrypto will not do ECDH
+   with it. **And the shortcut fails silently in the dangerous direction** —
+   measured on Bun 1.3.14, an Ed25519 public key imports as X25519 and derives
+   32 plausible bytes, while its own private half is refused, so the ciphertext
+   is one nobody can open. Entities now carry a separate X25519 key.
+
+   **Built at `33dd549`** as ephemeral-static ECDH (libsodium's
+   `crypto_box_seal` shape). Sealing is confidentiality only and says nothing
+   about who sent a message — **authenticity remains the Ed25519 signature**,
+   and the two halves stay separate on purpose.

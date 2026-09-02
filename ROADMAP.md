@@ -1017,8 +1017,8 @@ its shape:
 > `taken_as` is your unit argument. A measurement whose construct and whose
 > STATED construct can drift apart is the identical defect one level up.
 
-- **You supply the COMMAND, not the number and a description of it.** The adapter
-  runs it and records the command **verbatim** as the construct. **There is no
+- **You supply the COMMAND and its output, not the number and a description.**
+  The command is recorded **verbatim** as the construct. **There is no
   parameter for a caller's own wording**, which is what makes drift impossible
   rather than discouraged. *"48 vectors mentioning NaN"* becoming *"48 NaN
   vectors"* is the defect; a per-function line count that swept the next
@@ -1028,6 +1028,22 @@ its shape:
   re-run prose. They can re-run a command. **A reproducible reference whose
   construct is a description was never actually reproducible** — 7.1 defined the
   mode correctly and the adapter surface is what makes it true.
+- ⚠️ **THE ADAPTER DOES NOT EXECUTE THE COMMAND, and that is a correction.** The
+  first version ran it via `sh -c` to guarantee the value came from the command.
+  A security review rejected it and was right: **the command arrives as an MCP
+  tool parameter, an agent's context can hold untrusted content, and a prompt
+  injection would therefore reach a shell THROUGH A MESSAGE-SENDING TOOL** —
+  plus an unbounded read and no timeout. The reasoning that let it through was
+  *"the agent can run commands anyway"*, **which is wrong in the way that
+  matters: when the agent runs one it passes through the harness's permission
+  layer, and that path did not.**
+  - **The deeper error was building a guarantee the design already provides.** A
+    `reproducible` reference is verified by the **recipient re-running it** —
+    that is the definition of the mode. Executing it in the adapter bought
+    nothing re-running does not, and paid remote code execution for it.
+  - The two protections divide cleanly, and neither needs execution:
+    **paraphrase drift is impossible because there is no prose field**;
+    **a fabricated value is caught by re-running**, which is the mode's contract.
 - **A failed command attaches NOTHING and says so.** "Could not measure" and
   "measured zero" are different facts — the same distinction the durability
   check had to learn. **An empty stdout with exit 0 IS a measurement** and is

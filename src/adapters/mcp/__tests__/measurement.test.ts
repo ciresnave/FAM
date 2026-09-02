@@ -1,85 +1,86 @@
 import { test, expect, describe } from 'bun:test';
-import { buildMeasurementRef, describeMeasurementFailure } from '../measurement';
+import { buildMeasurementRef } from '../measurement';
 
 // ============================================================================
 // A measurement's number and its construct must not be independently
 // specifiable, because that is how they drift.
 //
-// OBSERVED, repeatedly, across the portfolio: the arithmetic correct and the
-// construct never stated, or stated as a paraphrase meaning something else.
-// "48 vectors mentioning NaN" became "48 NaN vectors". A per-function line
-// count swept the next function's doc comments and produced a 3.1x ratio for a
-// 14-vs-11 reality. "86/208" was reported against a rule written about
-// "86/143". THE NUMBER WAS RIGHT EVERY TIME.
+// OBSERVED, repeatedly, and never as bad arithmetic: "48 vectors mentioning
+// NaN" became "48 NaN vectors". A per-function line count swept the next
+// function's doc comments and produced a 3.1x ratio for a 14-vs-11 reality.
+// "86/208" was reported against a rule written about "86/143". THE NUMBER WAS
+// RIGHT EVERY TIME.
 //
-// So `construct` is the COMMAND, derived from the run, never a caller-supplied
-// description of it. This also makes `reproducible` mean what it claimed: a
-// recipient cannot re-run prose, but they can re-run a command.
+// So there is NO PROSE FIELD. `construct` is the command. A caller cannot
+// describe what they counted because there is nowhere to put a description.
 //
-// Same fix as making the unit a required argument to assertWithinLimit — the
-// defect was never a wrong choice, it was that the count and the statement of
-// the count could be written separately.
+// THE ADAPTER DOES NOT RUN THE COMMAND, and that is a correction rather than a
+// limitation. The first version executed it via `sh -c` to guarantee the value
+// came from the command; a security review was right to reject that — the
+// command arrives as a tool parameter, an agent's context can hold untrusted
+// content, and it would have put a shell behind a message-sending tool, outside
+// the harness's permission layer.
+//
+// The deeper mistake was building a guarantee the design already provides. A
+// reproducible reference is verified by the RECIPIENT RE-RUNNING it. Executing
+// it here bought nothing re-running does not, and paid remote code execution
+// for it. The two protections divide cleanly:
+//
+//   paraphrase drift   -> impossible: there is no prose field
+//   fabricated value   -> caught by re-running, which is the mode's contract
 // ============================================================================
 
-const ctx = { takenAt: 'origin/main@e516f54', takenAs: 'ciresnave-bot' };
+const ctx = { takenAt: 'HEAD@e516f54', takenAs: 'ciresnave-bot' };
 
 describe('the construct is the command, not a description of it', () => {
-  test('it is copied verbatim from the run', () => {
+  test('it is recorded verbatim', () => {
     const ref = buildMeasurementRef(
-      { command: 'rg -c "NaN" corpus.json', stdout: '48\n', exitCode: 0 },
+      { command: 'rg -c "NaN" corpus.json', value: '48' },
       ctx
-    )!;
+    );
     expect(ref.payload.construct).toBe('rg -c "NaN" corpus.json');
     expect(ref.payload.value).toBe('48');
   });
 
-  // The caller cannot supply a construct at all. There is no parameter for it,
-  // which is what makes drift impossible rather than discouraged.
-  test('a caller cannot substitute their own wording', () => {
+  // There is no parameter for a caller's own wording. That is what makes drift
+  // impossible rather than merely discouraged — "48 NaN vectors" has nowhere to
+  // go, so it cannot be recorded as what was counted.
+  test('there is nowhere to put a paraphrase', () => {
     const ref = buildMeasurementRef(
-      { command: 'rg -c "NaN" corpus.json', stdout: '48\n', exitCode: 0 },
+      { command: 'rg -c "NaN" corpus.json', value: '48' },
       { ...ctx, kind: 'measurement.count' }
-    )!;
-    // "48 NaN vectors" is the paraphrase that caused the incident. The only
-    // thing recordable here is what actually ran.
+    );
+    const fields = Object.keys(ref.payload).sort();
+    expect(fields).toEqual(['construct', 'taken_as', 'taken_at', 'value']);
     expect(ref.payload.construct).not.toContain('NaN vectors');
-    expect(ref.payload.construct).toBe('rg -c "NaN" corpus.json');
   });
 
   test('it carries when and as whom, so a stored value stays re-readable', () => {
-    const ref = buildMeasurementRef({ command: 'echo 1', stdout: '1', exitCode: 0 }, ctx)!;
-    expect(ref.payload.taken_at).toBe('origin/main@e516f54');
+    const ref = buildMeasurementRef({ command: 'echo 1', value: '1' }, ctx);
+    expect(ref.payload.taken_at).toBe('HEAD@e516f54');
     expect(ref.payload.taken_as).toBe('ciresnave-bot');
     expect(ref.mode).toBe('reproducible');
   });
 });
 
-describe('a failed command produces no measurement', () => {
-  // "Could not measure" and "measured zero" are different facts. Recording an
-  // empty value would be a claim about a world nobody observed — the same
-  // distinction the durability check had to learn.
-  test('null rather than a zero', () => {
-    expect(
-      buildMeasurementRef({ command: 'rg -c "NaN" missing.json', stdout: '', exitCode: 2 }, ctx)
-    ).toBeNull();
+describe('an empty result is a result', () => {
+  // Zero matches is a real observation. Treating an empty value as "no
+  // measurement" would discard exactly the finding a negative control exists to
+  // produce — and the caller is told separately that a FAILED command should
+  // attach nothing at all, which is the different fact.
+  test('an empty value is recorded rather than dropped', () => {
+    const ref = buildMeasurementRef({ command: 'rg -c "absent" corpus.json', value: '' }, ctx);
+    expect(ref.payload.value).toBe('');
+    expect(ref.payload.construct).toBe('rg -c "absent" corpus.json');
   });
+});
 
-  test('an empty stdout from a SUCCEEDING command is still a measurement', () => {
-    // Zero matches with exit 0 is a real observation and must not be discarded
-    // alongside the failures — that would erase exactly the finding a negative
-    // control exists to produce.
-    const ref = buildMeasurementRef(
-      { command: 'rg -c "absent" corpus.json', stdout: '', exitCode: 0 },
-      ctx
-    );
-    expect(ref).not.toBeNull();
-    expect(ref!.payload.value).toBe('');
-  });
-
-  test('the failure is described for the sender rather than swallowed', () => {
-    const msg = describeMeasurementFailure({ command: 'false', stdout: '', exitCode: 1 });
-    expect(msg).toMatch(/NOT attached/i);
-    expect(msg).toContain('false');
-    expect(msg).toMatch(/measured zero/i);
+describe('the adapter is not an execution path', () => {
+  // A structural assertion, because the vulnerability was not a bad value but a
+  // capability: this module must not gain the ability to run what it is given.
+  test('the module exports only a builder', async () => {
+    const mod = await import('../measurement');
+    const exported = Object.keys(mod).sort();
+    expect(exported).toEqual(['buildMeasurementRef']);
   });
 });

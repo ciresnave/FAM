@@ -46,18 +46,23 @@ export const FAM_TOOLS = [
         measure: {
           type: 'object' as const,
           description:
-            'Optional. Attach a MEASUREMENT by giving the COMMAND that produces it. ' +
-            'The adapter runs it and records the command verbatim as the construct — ' +
-            'you cannot supply your own wording for what was counted, and that is the ' +
-            'point: "48 vectors mentioning NaN" becoming "48 NaN vectors" is the ' +
-            'defect this prevents. It also makes the reference genuinely reproducible, ' +
-            'because a recipient can re-run a command and cannot re-run a description. ' +
-            'A command that FAILS attaches nothing and tells you so — "could not ' +
-            'measure" is not "measured zero".',
+            'Optional. Attach a MEASUREMENT as the command that produces it plus what ' +
+            'it produced. The command is recorded verbatim as the construct — there is ' +
+            'no field for your own wording of what was counted, and that is the point: ' +
+            '"48 vectors mentioning NaN" becoming "48 NaN vectors" is the defect this ' +
+            'prevents. It also makes the reference genuinely reproducible, because a ' +
+            'recipient can re-run a command and cannot re-run a description — and ' +
+            're-running is how they check the value, which is why FAM does not run it ' +
+            'for you. If your command FAILED, attach nothing: "could not measure" is ' +
+            'not "measured zero".',
           properties: {
             command: {
               type: 'string' as const,
-              description: 'The command whose output IS the measurement, e.g. `rg -c "NaN" corpus.json`',
+              description: 'The command you ran, e.g. `rg -c "NaN" corpus.json`',
+            },
+            value: {
+              type: 'string' as const,
+              description: 'What it output. An empty string is a real result.',
             },
           },
         },

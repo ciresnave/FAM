@@ -842,11 +842,64 @@ Summary of where it landed:
 - **Restart persistence:** declared intent persists, observed state does not.
   Assignment is the one that fails the test today.
 
-⚠️ **BLOCKING DEPENDENCY ON PHASE 5, recorded here so it is remembered rather
-than discovered:** the recommended server-attested ruling means *"the broker says
-so"*, which stops being sufficient the moment a ruling crosses to a server the
-recipient does not control. **Federation requires entity-signed rulings with a
-verifiable account→entity ownership chain.** Accounts hold no key material today
+**Buildable items are Phase 7 below**, with the Phase 5 precondition attached
+there.
+
+### Phase 7 — Messaging Model (buildable items, none started)
+
+Derived from `DESIGN-MESSAGING.md`. **Ordering is with the portfolio PM** — the
+items have real dependencies AND differing external costs, and the costs are
+visible from the portfolio rather than from here.
+
+**7.1 — Typed reference (`message_refs`).** The shared mechanism the other items
+rest on. A namespaced, opaque-to-the-core reference attached to a message:
+`{kind, ...fields, mode}` where `mode` is `verifiable` or `reproducible`. FAM
+carries and compares; it never resolves or interprets. Migration for the table,
+a send-path field, adapter surface, console display.
+- **`durable` for `git.ref` must be CHECKED AT SEND TIME.** Squash-merge orphans
+  PR-head SHAs, so a sender-asserted flag is one more unverifiable claim. This is
+  the only part that requires FAM to talk to something outside itself, and it may
+  belong in the adapter rather than the core — **open question, decide before
+  building.**
+
+**7.2 — Rulings as records.** A ruling is stored and QUERIED by the grantee, not
+relayed as a claim. Needs: a `rulings` table (granter account, scope, body,
+issued_at, revoked_at), a create path behind account auth, a lookup the grantee
+can call, and console surfaces. **Server-attested; see the Phase 5 precondition
+below.**
+- **Currently has a running cost**: vulkane cannot act on a relayed publish grant,
+  so a licensing defect in published crates stays unfixed. **That specific
+  instance does not need this feature — it needs CireSnave to tell vulkane
+  directly.** The feature stops it recurring.
+
+**7.3 — Task ownership.** An assignment object whose owner is an entity, so
+"owner not currently connected" is a query rather than something a coordinator
+must remember. **Nothing in FAM answers this today**: `queue_empty`,
+`last_state_change` and session liveness all answer *"is this agent stalled"*, and
+an orphaned task is work that HAD an owner and LOST them. Cost of the gap: fuel
+PR #29, four days.
+- Persists across restart by the test in DESIGN-MESSAGING: a human should not
+  have to re-tell a coordinator what its lanes were doing.
+
+**7.4 — Measurement provenance.** `{value, construct, ref, taken_at}` as a
+`reproducible` reference. `construct` is the load-bearing field — four incidents
+in one day where the arithmetic was correct and the subject it ranged over was
+never stated. Staleness must be a **checkable ref**, not a wall clock: "taken at
+`origin/main` 5ecba5ce" lets a reader count commits; a timestamp only says it is
+old.
+
+**7.5 — Correlation (`reply_to`).** Lowest ranked, **on bounded evidence**. The
+PM sees dispatch-shaped PM-to-lane traffic which is naturally self-contained, and
+says it costs verbosity without changing decisions. CireSnave named customer
+support as a target environment, which would look nothing like that traffic.
+**Do not close this on the current evidence; it is unmeasured for the shapes that
+would need it.**
+
+⚠️ **BLOCKING DEPENDENCY ON PHASE 5, recorded so it is remembered rather than
+discovered:** 7.2's server attestation means *"the broker says so"*, which stops
+being sufficient the moment a ruling crosses to a server the recipient does not
+control. **Federation requires entity-signed rulings with a verifiable
+account→entity ownership chain.** Accounts hold no key material today
 (`entities` have keypairs; `accounts` have id, display_name and timestamps), so
 this is a schema question and not only a protocol one.
 

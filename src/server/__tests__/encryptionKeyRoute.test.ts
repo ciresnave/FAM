@@ -64,7 +64,16 @@ function sessionFor(entityId: string): string {
   return getDatabaseContext().sessions.create(entityId).id;
 }
 
-async function post(path: string, body: unknown): Promise<{ status: number; data: any }> {
+/**
+ * The endpoints this file exercises, as a closed set.
+ *
+ * A `string` parameter here made a typo'd path an expectation failure three
+ * assertions later; a union makes it a compile error. It also states what this
+ * file touches without reading every call.
+ */
+type Endpoint = '/entities/encryption-key' | '/entities/list';
+
+async function post(path: Endpoint, body: unknown): Promise<{ status: number; data: any }> {
   const res = await fetch(`${URL_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -162,6 +162,63 @@ async function resolveGitRoot(): Promise<string | null> {
   }
 }
 
+/**
+ * Is `sha` reachable from the default branch, as this checkout currently sees it?
+ *
+ * THE CHECK LIVES HERE, NOT IN THE CORE. A core that runs `git` has learned what
+ * a repository is, which is the concept-smuggling FAM refuses — it flags
+ * `weird.tenant_slug` exactly as readily as `mcp.cwd` precisely so it never owns
+ * a framework-local idea. The adapter knows what a repo is; the core stores the
+ * result.
+ *
+ * WHY IT MATTERS: squash-merge orphans PR-head SHAs. A reference that resolves
+ * for the sender today is unreachable for the recipient tomorrow, which is the
+ * same shape as every other defect here — a claim true from where the sender
+ * stands and false from where the recipient stands.
+ *
+ * THE RESULT IS A MEASUREMENT, NOT A FACT. It was true when this looked, against
+ * a remote-tracking ref that may itself be behind. So it is emitted as a
+ * REPRODUCIBLE reference carrying what it ranged over, the head it was checked
+ * against, and the identity it ran as — never as a bare `durable: true`, which
+ * would be one more unverifiable self-attestation.
+ */
+async function gitDurability(sha: string): Promise<{
+  durable: boolean;
+  construct: string;
+  takenAt: string;
+  takenAs: string;
+} | null> {
+  async function git(args: string[]): Promise<string | null> {
+    try {
+      const proc = Bun.spawn(['git', ...args], { stdout: 'pipe', stderr: 'ignore' });
+      const out = (await new Response(proc.stdout).text()).trim();
+      await proc.exited;
+      return proc.exitCode === 0 ? out : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const defaultRef = (await git(['rev-parse', '--abbrev-ref', 'origin/HEAD'])) ?? 'origin/main';
+  const headSha = await git(['rev-parse', defaultRef]);
+  if (!headSha) return null;
+
+  const proc = Bun.spawn(['git', 'merge-base', '--is-ancestor', sha, defaultRef], {
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  await proc.exited;
+
+  const identity = (await git(['config', 'user.email'])) ?? 'unknown';
+
+  return {
+    durable: proc.exitCode === 0,
+    construct: 'reachable from ' + defaultRef + ' as fetched in this checkout',
+    takenAt: defaultRef + '@' + headSha,
+    takenAs: identity,
+  };
+}
+
 async function main() {
   // 1. Load credentials
   const credentials = await loadCredentials();
@@ -333,8 +390,44 @@ When you start, proactively list entities and channels to understand who's avail
               isError: true,
             };
           }
+          // Build references BEFORE sending, so an unbuildable one fails the
+          // send rather than arriving as a message that quietly lacks it.
+          const refs: Array<{ kind: string; mode: string; payload: Record<string, string> }> = [];
+          const gitRef = (args as any).git_ref;
+          if (gitRef?.sha) {
+            refs.push({
+              kind: 'git.ref',
+              mode: 'verifiable',
+              payload: {
+                digest: String(gitRef.sha),
+                ...(gitRef.repo ? { repo: String(gitRef.repo) } : {}),
+              },
+            });
+
+            // The durability CLAIM is a SEPARATE reproducible reference, not a
+            // field on the one above. It was true when the adapter looked, and a
+            // recipient can only re-run it — so it owes construct, taken_at and
+            // taken_as like any other measurement.
+            const d = await gitDurability(String(gitRef.sha));
+            if (d) {
+              refs.push({
+                kind: 'git.durable',
+                mode: 'reproducible',
+                payload: {
+                  value: d.durable ? 'true' : 'false',
+                  construct: d.construct,
+                  taken_at: d.takenAt,
+                  taken_as: d.takenAs,
+                  subject: String(gitRef.sha),
+                },
+              });
+            }
+          }
+
           if (to_entity) {
-            const result = await client.sendDirectMessage(to_entity, text);
+            const result = await client.sendDirectMessage(
+              to_entity, text, refs.length ? refs : undefined
+            );
             return {
               content: [{ type: 'text' as const, text: describeDelivery(to_entity, result) }],
             };

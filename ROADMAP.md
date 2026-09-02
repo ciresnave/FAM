@@ -894,7 +894,41 @@ is **reproducible, not verifiable**, and therefore needs the ref it was checked
 at — a `durable` flag without one is precisely the unverifiable self-attestation
 the predicate exists to replace.
 
-**7.1 — Typed reference (`message_refs`).** The shared mechanism the other items
+**7.1 — Typed reference. DONE** (migration v15). `message_refs` table, attached
+on send and pushed with the message, plus a `git_ref` option on the MCP send tool
+that emits the durability claim alongside it.
+- **The core validates STRUCTURE and never meaning.** It does not know what
+  `git.ref` is and accepts `weird.tenant_slug` on identical terms — there is a
+  test asserting that, because it is the property keeping FAM a federation
+  protocol rather than a git client. Kinds are namespaced for the same reason
+  context keys are.
+- **THE RULES BIND TO THE MODE, NOT THE KIND.** That is what lets the core
+  enforce them while staying ignorant: it does not know what a measurement is,
+  only that anything claiming to be *reproducible* must say when, as whom, and
+  over what.
+  - `verifiable` → requires a `digest` to compare after re-fetching. Without one
+    it is a name, and a name is what *"see DESIGN.md"* already was.
+  - `reproducible` → requires `construct`, `taken_at` and `taken_as`.
+- **`taken_as` came from the PM and earns its place with a three-hour-old case:**
+  `GET /branches/main/protection` returns **404 to a non-admin and 404 to an
+  admin with opposite meanings**, separated only by the body. **After any
+  privilege change, every absence recorded earlier is UNVERIFIED — not wrong,
+  unverified** — and without the identity it was taken as, a stored zero cannot
+  be re-read at all.
+- **Durability is a SEPARATE reproducible reference, not a field.** `git.ref` is
+  verifiable (re-fetch the sha); `git.durable` is reproducible (re-run the
+  reachability check). Emitting `durable: true` as a field on the verifiable ref
+  would have made an adapter's momentary observation look like a property of the
+  commit. Verified discriminating: a merged commit reports `true`, a fabricated
+  sha reports `false`, both against a named `origin/main` head.
+- **The check runs in the ADAPTER**, per the ruling: a core that runs `git` has
+  learned what a repository is.
+- References are attached **before** the push, so an online recipient gets the
+  message with them rather than a bare text it must ask about — and an invalid
+  reference **fails the send** rather than letting the message land silently
+  without it.
+
+**7.1 — Typed reference (original scope).** The shared mechanism the other items
 rest on. A namespaced, opaque-to-the-core reference attached to a message:
 `{kind, ...fields, mode}` where `mode` is `verifiable` or `reproducible`. FAM
 carries and compares; it never resolves or interprets. Migration for the table,

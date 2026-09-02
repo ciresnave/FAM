@@ -9,6 +9,7 @@
 import type { DatabaseContext } from '../../db/transaction';
 import type { WebSocketManager } from '../websocket';
 import type { PushOutcome } from '../websocket';
+import type { MessageRefInput } from '../../db/repositories/messageRef';
 import type { Message, EntityId, ChannelId } from '../../types';
 import { NotFoundError, ForbiddenError, InsufficientCapabilitiesError, EntityNotInChannelError } from '../../types/errors';
 import { validateEntityId, validateChannelId, validateMessageText } from '../../types/validation';
@@ -64,7 +65,8 @@ export class MessageSendService {
   async sendDirectMessage(
     fromEntityId: EntityId,
     toEntityId: EntityId,
-    text: string
+    text: string,
+    refs?: MessageRefInput[]
   ): Promise<SendResult> {
     validateEntityId(fromEntityId);
     validateEntityId(toEntityId);
@@ -96,6 +98,20 @@ export class MessageSendService {
       return this.ctx.messages.insertDirectMessage(fromEntityId, toEntityId, storedText, trimmed);
     })();
 
+    // References are attached after the row exists and BEFORE the push, so a
+    // recipient that is online receives the message with its references rather
+    // than a bare text it has to ask about. A reference that arrives separately
+    // is a reference that can be lost.
+    //
+    // Validation lives in the repository, so an invalid reference throws here
+    // and the caller learns their reference was rejected — rather than the
+    // message landing without it and looking like a successful send.
+    if (refs && refs.length > 0) {
+      for (const ref of refs) {
+        this.ctx.messageRefs.attach(message.id, ref);
+      }
+    }
+
     // Push to recipient if online, and KEEP the answer.
     const outcome = this.wsManager.pushToEntity(toEntityId, {
       type: 'message',
@@ -105,7 +121,8 @@ export class MessageSendService {
       text: trimmed,
       timestamp: message.sent_at,
       message_id: message.id,
-    });
+      refs: refs && refs.length > 0 ? this.ctx.messageRefs.listForMessage(message.id) : undefined,
+    } as any);
 
     // Read the recipient AFTER the push, so the reported state is the state
     // the outcome was decided against rather than a snapshot from before it.

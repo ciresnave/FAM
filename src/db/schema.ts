@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -478,6 +478,39 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     `CREATE INDEX IF NOT EXISTS idx_tasks_account_status
        ON tasks(account_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_entity_id)`,
+  ],
+  15: [
+    // A typed reference attached to a message.
+    //
+    // WHY NOT ATTACHMENTS: not one handoff in the observed portfolio has ever
+    // needed bytes — documents moved as paths, SHAs, PR numbers and URLs. The
+    // failure was never transfer; it is that a reference cannot be VERIFIED.
+    //
+    // THE CORE NEVER INTERPRETS ONE. `payload` is opaque JSON: this schema does
+    // not know what `git.ref` means and accepts `weird.tenant_slug` on the same
+    // terms. Kinds are namespaced for the reason context keys are — a bare
+    // `ref` would be FAM claiming a concept it does not have.
+    //
+    // `mode` is the load-bearing column, and the validation rules attach to IT
+    // rather than to `kind`:
+    //
+    //   verifiable    recipient RE-FETCHES and compares -> needs a digest
+    //   reproducible  recipient can only RE-RUN it      -> needs construct,
+    //                                                      taken_at, taken_as
+    //
+    // That is what lets the core enforce the rules while staying ignorant: it
+    // does not know what a measurement is, only that anything claiming to be
+    // reproducible must say when, as whom, and over what.
+    `CREATE TABLE IF NOT EXISTS message_refs (
+      id TEXT PRIMARY KEY,
+      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK(mode IN ('verifiable', 'reproducible')),
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_message_refs_message
+       ON message_refs(message_id)`,
   ],
   9: [
     // Browser sessions for the admin console.

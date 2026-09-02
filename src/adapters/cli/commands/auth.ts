@@ -2,6 +2,7 @@
 //
 // Opens browser for OAuth, handles callback, saves credentials.
 
+import { provisionEntity } from '../provision';
 import { createServer } from 'http';
 import { URL } from 'url';
 import { apiRequest } from '../client';
@@ -16,11 +17,6 @@ interface CallbackResponse {
   account_id: string;
   display_name: string | null;
   token: string;
-}
-
-interface EntityResponse {
-  entity_id: string;
-  encrypted_key_file: string;
 }
 
 // ============================================================================
@@ -155,12 +151,9 @@ export async function runAuthCommand(
   // Use hostname as entity name (configurable via --name flag)
   const entityName = (flags.name as string) || require('os').hostname();
   
-  const entityData = await apiRequest<EntityResponse>(config, '/accounts/create-entity', {
-    account_token: token,
-    name: entityName,
-    type: 'human',
-    passkey,
-  });
+  // Key pair generated HERE; the passkey never leaves this process.
+  // See src/adapters/cli/provision.ts.
+  const entityData = await provisionEntity(config, token, entityName, 'human', passkey);
   
   console.log(`Entity created: ${entityData.entity_id}`);
   
@@ -176,7 +169,17 @@ export async function runAuthCommand(
     active_entity_id: entityData.entity_id,
     entities: [
       ...filtered,
-      { entity_id: entityData.entity_id, encrypted_key_file: entityData.encrypted_key_file },
+      {
+        entity_id: entityData.entity_id,
+        // Stringified because the credential store holds a JSON STRING and
+        // client.ts reads it back with JSON.parse. The server used to return an
+        // object here and it was stored unserialised into a string-typed field,
+        // so JSON.parse got "[object Object]" and threw — every CLI command
+        // needing an entity session was broken after `fam auth login`. The
+        // type error that surfaced it only appeared once provisioning moved
+        // client-side and the value stopped being `any`.
+        encrypted_key_file: JSON.stringify(entityData.encrypted_key_file),
+      },
     ],
     server_url: config.serverUrl || DEFAULT_SERVER_URL,
   });

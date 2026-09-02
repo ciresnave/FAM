@@ -285,6 +285,62 @@ export function entityRoutes(
       },
     },
 
+    // POST /entities/encryption-key
+    // Publish this entity's X25519 PUBLIC key, so others can seal to it.
+    //
+    // ⚠️ THE SERVER NEVER GENERATES THE PAIR AND NEVER ACCEPTS THE PRIVATE
+    // HALF. Either would put FAM in a position to read the entity's mail, which
+    // is the exact property `src/crypto/sealing.ts` exists to remove. The entity
+    // makes its own pair and tells the server the public half; that is the whole
+    // protocol, and it is why the column is nullable and unbackfillable.
+    //
+    // Identity comes from the SESSION, never from the body. This route is the
+    // sharpest case for that rule in the codebase: honouring a body-supplied
+    // `entity_id` would let any authenticated entity replace any other's
+    // encryption key, and every subsequent sender would then seal to the
+    // attacker's key. Not a disclosure bug — a message-interception one.
+    //
+    // There is no matching READ route. `encryption_public_key` rides on the
+    // entity representation a caller is already entitled to see, so visibility
+    // is whatever the directory already grants. A second endpoint would be a
+    // second answer to "may A see B", and the existing one is the tested one.
+    {
+      method: 'POST',
+      pattern: '/entities/encryption-key',
+      handler: async (req) => {
+        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { encryption_public_key } = body;
+
+        // An ABSENT field is not an instruction to delete. Clearing a key
+        // silently downgrades every future message to this entity, so the only
+        // way to express "no key" is to have never published one.
+        if (typeof encryption_public_key !== 'string' || encryption_public_key === '') {
+          return new Response(
+            JSON.stringify({
+              error:
+                'encryption_public_key is required and must be a base64 X25519 public key. ' +
+                'Omitting it does not clear the existing key.',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Throws ValidationError (400) on a malformed or wrong-length key, and
+        // writes nothing — a half-applied update would leave this entity
+        // unreachable by every future sender.
+        ctx.entities.setEncryptionKey(entity_id, encryption_public_key);
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            entity_id,
+            encryption_public_key: ctx.entities.getEncryptionKey(entity_id),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    },
+
     // POST /entities/queue-state
     // Declare whether this entity's work queue is empty.
     //

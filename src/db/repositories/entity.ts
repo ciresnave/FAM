@@ -590,6 +590,11 @@ export class EntityRepository {
       capabilities: JSON.parse(row.capabilities || '{}'),
       location_server: row.location_server,
       public_key: row.public_key,
+      // NULL is preserved, not coerced to ''. "never published" and "published
+      // something empty" are different claims, and a sender testing this for
+      // truthiness would treat them the same — which is how a silent downgrade
+      // to unsealed begins. Same reasoning as `queue_empty` below.
+      encryption_public_key: row.encryption_public_key ?? null,
       status: row.status || 'offline',
       availability: row.availability || 'available',
       // NULL is preserved as null, not coerced to false. "never declared" and

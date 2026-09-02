@@ -33,7 +33,25 @@ export interface Entity {
   display_name: string | null;
   capabilities: EntityCapabilities;
   location_server: string | null;
-  public_key: string; // base64-encoded
+  public_key: string; // base64-encoded Ed25519 IDENTITY key — signs, cannot encrypt
+
+  /**
+   * Base64 X25519 public key, for sealing messages TO this entity.
+   *
+   * Separate from `public_key` because Ed25519 cannot do ECDH, and the shortcut
+   * fails silently: an Ed25519 public key imports as X25519 and derives 32
+   * plausible bytes while its own private half is refused, so the sender gets
+   * ciphertext the recipient can never open.
+   *
+   * `null` means the entity has never published one, which is a real state —
+   * IT CANNOT RECEIVE SEALED MESSAGES YET — and not a row waiting to be filled
+   * in. FAM cannot invent it: the private half belongs to the entity, and a
+   * server that made the pair could read the mail. Ask `canReceiveSealed`
+   * rather than testing this for truthiness, so falling back to unsealed is a
+   * decision somewhere instead of a default everywhere.
+   */
+  encryption_public_key: string | null;
+
   status: 'online' | 'offline' | 'away';
   /**
    * User-controlled intent, independent of connection state. 'unavailable'

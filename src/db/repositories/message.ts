@@ -176,7 +176,27 @@ export class MessageRepository {
     `);
 
     const messages = stmt.all(entityId, limit) as Message[];
-    return this.decryptMessages(messages);
+    // References ride the backlog too.
+    //
+    // They were attached durably and pushed on the live frame, but an offline or
+    // paused recipient reads through HERE — so without this a reference reached
+    // everyone who did not need to ask for it and nobody who did. The recipients
+    // most likely to have lost context are exactly the ones who were away.
+    const decrypted = await this.decryptMessages(messages);
+    return decrypted.map(m => {
+      const refs = this.db
+        .prepare('SELECT kind, mode, payload FROM message_refs WHERE message_id = ?')
+        .all(m.id) as Array<{ kind: string; mode: string; payload: string }>;
+      if (refs.length === 0) return m;
+      return {
+        ...m,
+        refs: refs.map(r => ({
+          kind: r.kind,
+          mode: r.mode,
+          payload: JSON.parse(r.payload) as Record<string, string>,
+        })),
+      } as typeof m;
+    });
   }
 
   /**

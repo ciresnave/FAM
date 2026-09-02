@@ -9,6 +9,7 @@
 import type { DatabaseContext } from '../../db/transaction';
 import type { WebSocketManager } from '../websocket';
 import type { PushOutcome } from '../websocket';
+import type { MessageRefInput } from '../../db/repositories/messageRef';
 import type { Message, EntityId, ChannelId } from '../../types';
 import { NotFoundError, ForbiddenError, InsufficientCapabilitiesError, EntityNotInChannelError } from '../../types/errors';
 import { validateEntityId, validateChannelId, validateMessageText } from '../../types/validation';
@@ -64,7 +65,8 @@ export class MessageSendService {
   async sendDirectMessage(
     fromEntityId: EntityId,
     toEntityId: EntityId,
-    text: string
+    text: string,
+    refs?: MessageRefInput[]
   ): Promise<SendResult> {
     validateEntityId(fromEntityId);
     validateEntityId(toEntityId);
@@ -89,11 +91,30 @@ export class MessageSendService {
     // — the grant said no by the time the row existed.
     const storedText = await this.ctx.messages.prepareStoredText(trimmed);
 
+    // Validate references BEFORE anything is written.
+    //
+    // Attaching them after the insert meant an invalid reference threw with the
+    // message row already persisted: the caller saw an error and the recipient
+    // saw a bare message. "The send failed" and "the send half-succeeded" are
+    // different facts, and the second one is the dangerous shape this whole
+    // feature exists to remove.
+    if (refs) {
+      for (const ref of refs) this.ctx.messageRefs.validate(ref);
+    }
+
     const message = this.ctx.db.transaction(() => {
       if (!this.permissionChecker.canDirectMessage(sender, recipient)) {
         throw new ForbiddenError('Not permitted to message this entity');
       }
-      return this.ctx.messages.insertDirectMessage(fromEntityId, toEntityId, storedText, trimmed);
+      const inserted = this.ctx.messages.insertDirectMessage(
+        fromEntityId, toEntityId, storedText, trimmed
+      );
+      // Inside the transaction, so a message and its references land together
+      // or not at all.
+      if (refs) {
+        for (const ref of refs) this.ctx.messageRefs.attach(inserted.id, ref);
+      }
+      return inserted;
     })();
 
     // Push to recipient if online, and KEEP the answer.
@@ -105,7 +126,8 @@ export class MessageSendService {
       text: trimmed,
       timestamp: message.sent_at,
       message_id: message.id,
-    });
+      refs: refs && refs.length > 0 ? this.ctx.messageRefs.listForMessage(message.id) : undefined,
+    } as any);
 
     // Read the recipient AFTER the push, so the reported state is the state
     // the outcome was decided against rather than a snapshot from before it.

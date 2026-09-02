@@ -65,7 +65,7 @@ export function messageRoutes(
         // Errors (FamError subclasses) bubble to the HTTP error handler.
         const { message, delivery } = channel_id
           ? await sendService.sendChannelMessage(entity_id, channel_id, text)
-          : await sendService.sendDirectMessage(entity_id, to_entity, text);
+          : await sendService.sendDirectMessage(entity_id, to_entity, text, body.refs);
 
         // The delivery block is the point: 201 alone said "stored" and was read
         // as "delivered". Any outcome that is not delivery must be legible.

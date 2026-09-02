@@ -43,6 +43,20 @@ export const FAM_TOOLS = [
           description: 'The message text to send',
         },
       },
+        git_ref: {
+          type: 'object' as const,
+          description:
+            'Optional. Attach a verifiable git reference: {repo, sha}. The adapter ' +
+            'ALSO checks whether that sha is reachable from the default branch and ' +
+            'attaches the result as a separate reproducible reference — squash-merge ' +
+            'orphans PR-head SHAs, so a sha that resolves for you today may be ' +
+            'unreachable for the recipient tomorrow. Cite the merge commit, not the ' +
+            'branch head.',
+          properties: {
+            repo: { type: 'string' as const },
+            sha: { type: 'string' as const },
+          },
+        },
       required: ['text'],
     },
   },

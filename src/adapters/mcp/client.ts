@@ -488,8 +488,13 @@ export class FamClient {
   /**
    * Send a direct message.
    */
-  async sendDirectMessage(toEntity: EntityId, text: string): Promise<SendMessageResponse> {
+  async sendDirectMessage(
+    toEntity: EntityId,
+    text: string,
+    refs?: Array<{ kind: string; mode: string; payload: Record<string, string> }>
+  ): Promise<SendMessageResponse> {
     return this.request<SendMessageResponse>('/messages/send', {
+      refs,
       entity_id: this.entityId,
       to_entity: toEntity,
       text,

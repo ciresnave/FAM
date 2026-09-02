@@ -95,7 +95,7 @@ export function messageRoutes(
       pattern: '/messages/send-sealed',
       handler: async (req) => {
         const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
-        const { to_entity, envelope, text } = body;
+        const { to_entity, channel_id, envelope, text } = body;
 
         // Both fields present is an AMBIGUITY, and resolving it silently is how
         // the wrong path gets chosen. Whichever the server picked, half of
@@ -124,12 +124,19 @@ export function messageRoutes(
           );
         }
 
-        if (!to_entity) {
+        // Exactly one destination, mirroring /messages/send. Both is the same
+        // ambiguity as text-and-envelope: two fields naming two destinations,
+        // and resolving it silently sends to the one the caller did not mean.
+        if (to_entity && channel_id) {
           return new Response(
-            // Channels are not supported yet: a channel message needs one
-            // content key wrapped per recipient, which is not built. Saying so
-            // beats a generic rejection that reads like a malformed request.
-            JSON.stringify({ error: 'Must specify to_entity. Sealed channel messages are not supported yet.' }),
+            JSON.stringify({ error: 'Specify either to_entity or channel_id, not both.' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        if (!to_entity && !channel_id) {
+          return new Response(
+            JSON.stringify({ error: 'Must specify either to_entity or channel_id' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
@@ -146,11 +153,9 @@ export function messageRoutes(
           throw e;
         }
 
-        const { message, delivery } = await sendService.sendSealedDirectMessage(
-          entity_id,
-          to_entity,
-          envelope
-        );
+        const { message, delivery } = channel_id
+          ? await sendService.sendSealedChannelMessage(entity_id, channel_id, envelope)
+          : await sendService.sendSealedDirectMessage(entity_id, to_entity, envelope);
 
         return new Response(
           JSON.stringify({ message_id: message.id, delivery }),

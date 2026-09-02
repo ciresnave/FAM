@@ -382,15 +382,14 @@ export class WebSocketManager {
       return;
     }
 
-    if (!message.to) {
-      // Named as unbuilt rather than malformed: a sealed channel message needs
-      // one content key wrapped per recipient, and a caller reading "must
-      // specify to" would think their frame was wrong.
-      this.systemFrame(
-        ws,
-        entityId,
-        'A sealed send requires "to". Sealed channel messages are not supported yet.'
-      );
+    // Exactly one destination. Both is the same ambiguity as text-and-envelope.
+    if (message.to && message.channel) {
+      this.systemFrame(ws, entityId, 'Specify either "to" or "channel", not both.');
+      return;
+    }
+
+    if (!message.to && !message.channel) {
+      this.systemFrame(ws, entityId, 'A sealed send requires either "to" or "channel".');
       return;
     }
 
@@ -401,11 +400,17 @@ export class WebSocketManager {
     }
 
     try {
-      const sent = await this.sendService.sendSealedDirectMessage(
-        entityId,
-        message.to,
-        message.envelope as any
-      );
+      const sent = message.channel
+        ? await this.sendService.sendSealedChannelMessage(
+            entityId,
+            message.channel,
+            message.envelope as any
+          )
+        : await this.sendService.sendSealedDirectMessage(
+            entityId,
+            message.to!,
+            message.envelope as any
+          );
 
       this.send(ws, {
         type: 'ack',

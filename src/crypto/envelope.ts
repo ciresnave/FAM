@@ -14,6 +14,8 @@
 
 import { sign, verify, base64ToBuffer } from './keys';
 import { open, type SealedEnvelope } from './sealing';
+import type { SealedGroupEnvelope } from './groupSealing';
+import type { EntityId } from '../types';
 import { SignatureInvalidError } from '../types/errors';
 
 const ENVELOPE_VERSION = 1;
@@ -71,6 +73,17 @@ export function canonicalBytes(fields: EnvelopeFields & { version: number }): Ui
     fields.sealed.ciphertext,
   ];
 
+  return lengthPrefixed(parts);
+}
+
+/**
+ * Concatenate strings, each preceded by its byte length as a big-endian uint32.
+ *
+ * Shared by the flat and group envelopes deliberately. Two copies of a
+ * serialisation are two things that can drift, and a drift here means a
+ * signature that verifies against bytes the other side did not produce.
+ */
+function lengthPrefixed(parts: string[]): Uint8Array {
   const encoder = new TextEncoder();
   const encoded = parts.map((p) => encoder.encode(p));
   const total = encoded.reduce((n, p) => n + 4 + p.length, 0);
@@ -138,6 +151,95 @@ export async function openSigned(
     throw new SignatureInvalidError();
   }
   return open(recipientPrivateKeyBase64, envelope.sealed);
+}
+
+// ============================================================================
+// Group envelopes — the channel case
+// ============================================================================
+
+const GROUP_DOMAIN = 'fam-group-envelope-v1';
+
+export interface GroupEnvelopeFields {
+  sender: EntityId;
+  /** Channel id. A group envelope is addressed to a channel, never to an entity. */
+  channel: string;
+  sentAt: string;
+  sequence: number;
+  sealed: SealedGroupEnvelope;
+}
+
+export interface SignedGroupEnvelope extends GroupEnvelopeFields {
+  version: number;
+  signature: string;
+}
+
+/**
+ * The exact bytes a group signature covers.
+ *
+ * ⚠️ THE RECIPIENT LIST IS COUNT-PREFIXED AND EVERY FIELD LENGTH-PREFIXED, for
+ * the same reason the flat envelope's fields are, but with an extra failure the
+ * flat case does not have: a list.
+ *
+ * Without the count, appending a recipient to a shorter list and removing one
+ * from a longer list can produce identical bytes — so one signature would cover
+ * two different recipient sets, and the set is exactly what decides WHO CAN
+ * READ. Without per-field prefixes the same splice attack applies inside a
+ * recipient as it does between sender and recipient in the flat case.
+ *
+ * Signing the whole list rather than a digest of it is deliberate: a digest
+ * would be one more construction to get right, and the list is small.
+ */
+export function canonicalGroupBytes(
+  fields: GroupEnvelopeFields & { version: number }
+): Uint8Array {
+  const parts = [
+    GROUP_DOMAIN,
+    String(fields.version),
+    fields.sender,
+    fields.channel,
+    fields.sentAt,
+    String(fields.sequence),
+    String(fields.sealed.version),
+    fields.sealed.iv,
+    fields.sealed.ciphertext,
+    // The COUNT, so a list of n cannot be confused with a list of n±1.
+    String(fields.sealed.recipients.length),
+  ];
+
+  for (const r of fields.sealed.recipients) {
+    parts.push(r.entity, r.ephemeralPublicKey, r.iv, r.wrappedKey);
+  }
+
+  return lengthPrefixed(parts);
+}
+
+/** Sign a group envelope with the sender's Ed25519 private key. */
+export async function signGroupEnvelope(
+  senderPrivateKeyBase64: string,
+  fields: GroupEnvelopeFields
+): Promise<SignedGroupEnvelope> {
+  const version = ENVELOPE_VERSION;
+  const signature = await sign(
+    canonicalGroupBytes({ version, ...fields }),
+    senderPrivateKeyBase64
+  );
+  return { version, ...fields, signature };
+}
+
+/** Check a group envelope against the sender's Ed25519 public key. */
+export async function verifyGroupEnvelope(
+  senderPublicKeyBase64: string,
+  envelope: SignedGroupEnvelope
+): Promise<boolean> {
+  try {
+    return await verify(
+      canonicalGroupBytes(envelope),
+      envelope.signature,
+      senderPublicKeyBase64
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Reserved: `base64ToBuffer` is re-exported for callers assembling envelopes. */

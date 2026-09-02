@@ -14,7 +14,12 @@ import type { Message, EntityId, ChannelId } from '../../types';
 import { NotFoundError, ForbiddenError, InsufficientCapabilitiesError, EntityNotInChannelError, ValidationError } from '../../types/errors';
 import { validateEntityId, validateChannelId, validateMessageText } from '../../types/validation';
 import type { PermissionChecker } from './permissionChecker';
-import { verifyEnvelope, type SignedEnvelope } from '../../crypto/envelope';
+import {
+  verifyEnvelope,
+  verifyGroupEnvelope,
+  type SignedEnvelope,
+  type SignedGroupEnvelope,
+} from '../../crypto/envelope';
 
 /**
  * Reject anything that is not a well-formed signed envelope.
@@ -50,6 +55,54 @@ function fieldsFailing(value: unknown, spec: Record<string, string>): string[] {
   return Object.entries(spec)
     .filter(([field, expected]) => typeof obj[field] !== expected)
     .map(([field]) => field);
+}
+
+const GROUP_ENVELOPE_FIELDS = {
+  version: 'number',
+  sender: 'string',
+  channel: 'string',
+  sentAt: 'string',
+  sequence: 'number',
+  signature: 'string',
+} as const;
+
+const SEALED_GROUP_FIELDS = {
+  version: 'number',
+  iv: 'string',
+  ciphertext: 'string',
+} as const;
+
+const WRAPPED_KEY_FIELDS = {
+  entity: 'string',
+  ephemeralPublicKey: 'string',
+  iv: 'string',
+  wrappedKey: 'string',
+} as const;
+
+function assertGroupEnvelopeShape(envelope: SignedGroupEnvelope): void {
+  const bad = [
+    ...fieldsFailing(envelope, GROUP_ENVELOPE_FIELDS),
+    ...fieldsFailing(envelope?.sealed, SEALED_GROUP_FIELDS).map((f) => `sealed.${f}`),
+  ];
+
+  const recipients = envelope?.sealed?.recipients;
+  if (!Array.isArray(recipients) || recipients.length === 0) {
+    bad.push('sealed.recipients (non-empty array)');
+  } else {
+    // Every recipient, not just the first. A malformed entry at index 4 is the
+    // one that leaves exactly one member unable to read the message.
+    recipients.forEach((r, i) => {
+      for (const f of fieldsFailing(r, WRAPPED_KEY_FIELDS)) {
+        bad.push(`sealed.recipients[${i}].${f}`);
+      }
+    });
+  }
+
+  if (bad.length > 0) {
+    throw new ValidationError(
+      `Malformed sealed group envelope: missing or wrong type: ${bad.join(', ')}.`
+    );
+  }
 }
 
 function assertEnvelopeShape(envelope: SignedEnvelope): void {
@@ -333,6 +386,180 @@ export class MessageSendService {
   }
 
   /**
+   * Send a channel message the server cannot read.
+   *
+   * ⚠️ WHO CAN DECRYPT IS NOT WHO GETS PUSHED, and these were one set before
+   * sealing existed. `insertChannelMessage` excludes the sender from delivery
+   * rows — you are not pushed your own message. But if the sender is not a
+   * RECIPIENT of the seal, the sender can never decrypt their own message from
+   * history: their own outbox becomes unreadable to them. So the seal covers
+   * every member INCLUDING the sender; delivery covers every member EXCEPT the
+   * sender. Collapsing them is the obvious mistake in both directions.
+   *
+   * ⚠️ AND THE RECIPIENT SET MUST MATCH MEMBERSHIP EXACTLY.
+   *
+   *   a subset   -> some members hold a message they cannot open. The failure
+   *                 presents as "nothing arrived" and is diagnosed nowhere near
+   *                 the send.
+   *   a superset -> the SENDER decided who may read a channel message. That is
+   *                 the channel's decision, not theirs.
+   *
+   * A member with no encryption key blocks the send and is NAMED. Sealing to
+   * the members who can receive is the silent-partial-delivery shape: the
+   * sender believes the channel got it and one member never sees it, with no
+   * error anywhere. Blocking is the annoying answer and the honest one.
+   */
+  async sendSealedChannelMessage(
+    fromEntityId: EntityId,
+    channelId: ChannelId,
+    envelope: SignedGroupEnvelope
+  ): Promise<SendResult> {
+    validateEntityId(fromEntityId);
+    validateChannelId(channelId);
+    assertGroupEnvelopeShape(envelope);
+
+    this.requireSender(fromEntityId);
+
+    const channel = this.ctx.channels.getById(channelId);
+    if (!channel) throw new NotFoundError('Channel', channelId);
+
+    if (!this.ctx.channels.isMember(channelId, fromEntityId)) {
+      throw new EntityNotInChannelError(fromEntityId, channelId);
+    }
+
+    const sender = this.ctx.entities.getById(fromEntityId)!;
+
+    if (envelope.sender !== fromEntityId) {
+      throw new ValidationError(
+        `Envelope sender "${envelope.sender}" does not match the sending entity "${fromEntityId}".`
+      );
+    }
+    if (envelope.channel !== channelId) {
+      throw new ValidationError(
+        `Envelope channel "${envelope.channel}" does not match the addressed channel "${channelId}".`
+      );
+    }
+
+    this.assertRecipientsMatchMembership(channelId, envelope);
+
+    if (!(await verifyGroupEnvelope(sender.public_key, envelope))) {
+      throw new ValidationError(
+        'Envelope signature does not verify against the sending entity’s public key.'
+      );
+    }
+
+    const serialised = JSON.stringify(envelope);
+    const storedText = await this.ctx.messages.prepareStoredText(serialised);
+
+    const message = this.ctx.db.transaction(() => {
+      // The race guard. Membership lost between the check above and this write
+      // would otherwise still produce a stored message.
+      if (!this.ctx.channels.isMember(channelId, fromEntityId)) {
+        throw new EntityNotInChannelError(fromEntityId, channelId);
+      }
+      return this.ctx.messages.insertChannelMessage(
+        fromEntityId, channelId, storedText, serialised, { sealed: true }
+      );
+    })();
+
+    const pushMessage = {
+      type: 'message' as const,
+      from: fromEntityId,
+      channel: channelId,
+      to: null,
+      text: serialised,
+      sealed: true,
+      timestamp: message.sent_at,
+      message_id: message.id,
+    };
+
+    const outcomes: PushOutcome[] = [];
+    for (const member of this.ctx.channels.getMembers(channelId)) {
+      if (member.entity_id === fromEntityId) continue;
+
+      const memberEntity = this.ctx.entities.getById(member.entity_id);
+      if (!memberEntity) continue;
+      if (this.permissionChecker.isDeniedByRules(sender, memberEntity)) continue;
+
+      outcomes.push(this.wsManager.pushToEntity(member.entity_id, pushMessage as any));
+    }
+
+    return { message, delivery: this.channelDeliveryReport(outcomes) };
+  }
+
+  /**
+   * The envelope's recipients must be exactly the channel's members.
+   *
+   * Reports the DIFFERENCE in both directions by name, because "recipients do
+   * not match" leaves the sender to diff two lists by hand — and the lists are
+   * the thing they got wrong.
+   */
+  private assertRecipientsMatchMembership(
+    channelId: ChannelId,
+    envelope: SignedGroupEnvelope
+  ): void {
+    const members = this.ctx.channels.getMembers(channelId).map((m) => m.entity_id);
+
+    // ⚠️ MASKED BY THE `missing` CHECK BELOW ON OUTCOME ALONE, measured: a
+    // keyless member is also a member absent from the envelope, so removing
+    // this check still rejects, and even names the same entity. What changes is
+    // the DIAGNOSIS, and here the two point at different people:
+    //
+    //   keyless -> the member must publish a key. The sender cannot fix it.
+    //   missing -> the sender addressed the envelope wrong. Retrying the same
+    //              way fails forever, and it looks like their bug.
+    //
+    // Asserted specifically in the tests, or this would be deleted as redundant.
+    const keyless = members.filter((id) => !this.ctx.entities.canReceiveSealed(id));
+    if (keyless.length > 0) {
+      throw new ValidationError(
+        `Cannot seal to this channel: ${keyless.join(', ')} ${keyless.length === 1 ? 'has' : 'have'} ` +
+          `published no encryption key. Sealing to the rest would leave them silently unable to read it.`
+      );
+    }
+
+    const addressed = new Set(envelope.sealed.recipients.map((r) => r.entity));
+    const missing = members.filter((id) => !addressed.has(id));
+    const extra = [...addressed].filter((id) => !members.includes(id));
+
+    if (missing.length > 0) {
+      throw new ValidationError(
+        `Sealed channel message is missing recipients: ${missing.join(', ')}. ` +
+          `They would hold a message they cannot open.`
+      );
+    }
+    if (extra.length > 0) {
+      throw new ValidationError(
+        `Sealed channel message names non-members: ${extra.join(', ')}. ` +
+          `Who may read a channel message is the channel's decision, not the sender's.`
+      );
+    }
+  }
+
+  /**
+   * A channel send has one outcome per member, so the single-recipient
+   * vocabulary does not fit. Reported as the WEAKEST outcome any member got.
+   */
+  private channelDeliveryReport(outcomes: PushOutcome[]): DeliveryReport {
+    const weakest: PushOutcome = outcomes.includes('offline')
+      ? 'offline'
+      : outcomes.includes('paused')
+        ? 'paused'
+        : 'pushed';
+
+    return {
+      outcome: outcomes.length === 0 ? 'offline' : weakest,
+      recipient: {
+        status: `${outcomes.filter((o) => o === 'pushed').length}/${outcomes.length} pushed`,
+        availability: 'n/a (channel)',
+        queue_empty: null,
+        last_state_change: null,
+      },
+      declared_by_recipient: false,
+    };
+  }
+
+  /**
    * Send a message to a channel.
    * Channel membership implies allow (joining opts into messages from
    * members); explicit deny rules on a member's account still filter pushes
@@ -372,7 +599,9 @@ export class MessageSendService {
       if (!this.ctx.channels.isMember(channelId, fromEntityId)) {
         throw new EntityNotInChannelError(fromEntityId, channelId);
       }
-      return this.ctx.messages.insertChannelMessage(fromEntityId, channelId, storedText, trimmed);
+      return this.ctx.messages.insertChannelMessage(
+        fromEntityId, channelId, storedText, trimmed, { sealed: false }
+      );
     })();
 
     // Push to online channel members except the sender, skipping members

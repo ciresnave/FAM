@@ -166,3 +166,37 @@ export function validatePagination(params: PaginationParams): { limit: number; o
   
   return { limit, offset };
 }
+
+
+/**
+ * Refuse an over-long field, in the unit the message actually reports.
+ *
+ * ONE implementation because there were four, and they disagreed. Two counted
+ * bytes and said bytes; one counted CHARACTERS and said BYTES — so a multibyte
+ * value passed a bound it exceeded, wrong in the permissive direction, which is
+ * the direction that does not announce itself. That defect was found and fixed
+ * in one copy during review and left standing in another, which is what having
+ * copies means.
+ *
+ * The unit is a REQUIRED argument rather than a default, so a call site has to
+ * say which it means and the message matches by construction. Both units are
+ * legitimate: a storage bound is bytes, a readability bound ("a sentence or
+ * two") is characters, and picking one globally would make one of them lie.
+ *
+ * Refused, never truncated — a cut-off value is a claim nobody wrote.
+ */
+export function assertWithinLimit(
+  value: string,
+  limit: number,
+  opts: { unit: 'bytes' | 'characters'; field: string; why: string }
+): void {
+  const size =
+    opts.unit === 'bytes' ? new TextEncoder().encode(value).byteLength : value.length;
+
+  if (size > limit) {
+    throw new ValidationError(
+      `${opts.field} is ${size} ${opts.unit}; the limit is ${limit} ${opts.unit}. ` +
+        `Refused rather than truncated — ${opts.why}`
+    );
+  }
+}

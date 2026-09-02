@@ -139,3 +139,21 @@ describe('context does not cross an account boundary', () => {
     expect(ctx.entities.findContextCollisions(OTHER)).toEqual([]);
   });
 });
+
+describe('the context bound is measured in the unit it reports', () => {
+  // Found by following a complexity finding on an unrelated method. The bound
+  // counted JavaScript CHARACTERS and reported BYTES — the identical defect
+  // caught in message references during review, fixed there and left standing
+  // here, which is what having two copies of one rule means.
+  //
+  // A non-ASCII path is not exotic: C:\Проекты\... is an ordinary cwd.
+  test('a multibyte bag within the character count but over the byte limit is refused', () => {
+    const wide = '中'.repeat(1500); // 1500 characters, 4500 bytes
+    expect(() => ctx.entities.updateContext(A, { 'mcp.cwd': wide })).toThrow(/bytes/i);
+  });
+
+  test('an ASCII bag of the same character count is still accepted', () => {
+    const narrow = 'a'.repeat(1500); // 1500 characters, 1500 bytes
+    expect(() => ctx.entities.updateContext(A, { 'mcp.cwd': narrow })).not.toThrow();
+  });
+});

@@ -14,6 +14,7 @@
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'crypto';
 import { ValidationError } from '../../types/errors';
+import { assertWithinLimit } from '../../types/validation';
 import type { AccountId, EntityId } from '../../types';
 
 export interface Ruling {
@@ -47,6 +48,46 @@ export class RulingRepository {
   constructor(private db: Database) {}
 
   /**
+   * Check a ruling without storing it.
+   *
+   * Split out for the reason MessageRefRepository splits its own: a caller may
+   * need to reject bad input before committing anything else, and the same
+   * obligations should not be reimplemented at each call site. Extracting it
+   * also dropped create() below the complexity gate — the gate was pointing at
+   * a validation block wearing a persistence method's clothes.
+   */
+  validate(input: CreateRulingInput): void {
+    if (!input.grantee_account_id) throw new ValidationError('grantee_account_id is required');
+    if (!input.scope) throw new ValidationError('scope is required');
+    assertWithinLimit(input.scope, SCOPE_MAX, {
+      unit: 'characters',
+      field: 'scope',
+      why: 'a scope is an exact string both parties agreed on; a shortened one names something else.',
+    });
+
+    if (!input.body || input.body.trim() === '') {
+      throw new ValidationError('body is required: a ruling with no text grants nothing');
+    }
+    assertWithinLimit(input.body, BODY_MAX, {
+      unit: 'characters',
+      field: 'body',
+      why: 'a shortened ruling is a grant nobody wrote, and this is the field a grantee acts on.',
+    });
+
+    // An unattributed interpretation sitting beside an attributed quote is
+    // exactly how a derived convention acquires the granter's authority. It has
+    // happened; the note must name its author or not exist.
+    if (input.note?.trim() && !input.recorded_by_entity) {
+      throw new ValidationError(
+        'A note needs recorded_by_entity so it can be attributed to whoever wrote it. ' +
+          'The body belongs to the granter; a note is an interpretation and belongs to ' +
+          'its author. An unattributed reading beside an attributed quote is how the ' +
+          'derived thing ends up being read as the granter’s.'
+      );
+    }
+  }
+
+  /**
    * Record a ruling.
    *
    * `granterAccountId` is the AUTHENTICATED account and is supplied by the
@@ -55,36 +96,11 @@ export class RulingRepository {
    * with a schema around it — the same rule the entity routes follow.
    */
   create(granterAccountId: AccountId, input: CreateRulingInput): Ruling {
-    if (!input.grantee_account_id) throw new ValidationError('grantee_account_id is required');
-    if (!input.scope || input.scope.length > SCOPE_MAX) {
-      throw new ValidationError(`scope is required and must be at most ${SCOPE_MAX} characters`);
-    }
-    if (!input.body || input.body.trim() === '') {
-      throw new ValidationError('body is required: a ruling with no text grants nothing');
-    }
-    if (input.body.length > BODY_MAX) {
-      // Refused, not truncated. A cut-off ruling is a grant nobody made, and
-      // this is the field a grantee acts on.
-      throw new ValidationError(
-        `body is ${input.body.length} characters; the limit is ${BODY_MAX}. ` +
-          'Refused rather than truncated — a shortened ruling is a grant nobody wrote.'
-      );
-    }
+    this.validate(input);
 
-    // An unattributed interpretation sitting beside an attributed quote is
-    // exactly how a derived convention acquires the granter's authority. It has
-    // happened; the note must name its author or not exist.
     const note = input.note?.trim() || null;
-    if (note && !input.recorded_by_entity) {
-      throw new ValidationError(
-        'A note needs recorded_by_entity so it can be attributed to whoever wrote it. ' +
-          'The body belongs to the granter; a note is an interpretation and belongs to ' +
-          'its author. An unattributed reading beside an attributed quote is how the ' +
-          'derived thing ends up being read as the granter’s.'
-      );
-    }
-
     const id = randomUUID();
+
     this.db
       .prepare(
         `INSERT INTO rulings

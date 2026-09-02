@@ -2,6 +2,7 @@
 
 import { Database } from 'bun:sqlite';
 import { QueueNotEmptyError, ValidationError } from '../../types/errors';
+import { assertWithinLimit } from '../../types/validation';
 
 /** Long enough for a sentence or two of intent; short enough to stay scannable. */
 export const SUMMARY_MAX_LENGTH = 500;
@@ -349,13 +350,15 @@ export class EntityRepository {
     }
 
     const encoded = JSON.stringify(context);
-    if (encoded.length > CONTEXT_MAX_LENGTH) {
-      throw new ValidationError(
-        `Context bag is ${encoded.length} bytes; the limit is ${CONTEXT_MAX_LENGTH}. ` +
-          'Refused rather than trimmed — a partial bag would collide on the keys ' +
-          'that survived and stay silent about the ones that did not.'
-      );
-    }
+    // BYTES, via the one helper. This counted JavaScript characters while
+    // reporting bytes — the identical defect found in message references during
+    // review, fixed there and left standing here, which is what having two
+    // copies of a rule means. A non-ASCII path passed a bound it exceeded.
+    assertWithinLimit(encoded, CONTEXT_MAX_LENGTH, {
+      unit: 'bytes',
+      field: 'Context bag',
+      why: 'a partial bag would collide on the keys that survived and stay silent about the rest.',
+    });
 
     this.db.prepare('UPDATE entities SET context = ? WHERE id = ?').run(encoded, id);
   }
@@ -420,15 +423,15 @@ export class EntityRepository {
   updateSummary(id: EntityId, summary: string | null): void {
     const trimmed = summary?.trim() ?? '';
 
-    if (trimmed.length > SUMMARY_MAX_LENGTH) {
-      // Refused, not truncated. Truncation would publish a sentence the entity
-      // did not write, and the value of the field is that it is their words.
-      throw new ValidationError(
-        `Summary is ${trimmed.length} characters; the limit is ${SUMMARY_MAX_LENGTH}. ` +
-          'Shorten it rather than relying on truncation — a cut-off summary is ' +
-          'a claim the entity did not make.'
-      );
-    }
+    // CHARACTERS, deliberately: this is a readability bound ("a sentence or
+    // two"), not a storage one, and a 500-character summary reads the same in
+    // any script. The unit is stated at the call site so the message cannot
+    // drift from the count.
+    assertWithinLimit(trimmed, SUMMARY_MAX_LENGTH, {
+      unit: 'characters',
+      field: 'Summary',
+      why: 'a cut-off summary is a claim the entity did not make.',
+    });
 
     if (trimmed === '') {
       this.db

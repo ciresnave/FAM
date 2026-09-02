@@ -68,6 +68,37 @@ by whichever server relayed it — messages carry no signature, only a session i
 the server issued. Under this model a forged message requires a private key, not
 a compromised relay.
 
+> ⚠️ **AND THAT SENTENCE IS CURRENTLY FALSE IN ONE DIRECTION, MEASURED
+> 2026-09-02 at `4a4de70`. `POST /accounts/create-entity` GENERATES the
+> entity's Ed25519 keypair server-side** (`src/server/routes/accounts.ts:215`),
+> encrypts the private half under the passkey and returns it. **It is not
+> stored — `grep private_key src/db/` returns nothing — but the server HELD it.**
+>
+> **So "a forged message requires a private key" is true, and the relay was
+> given that key at creation.** A server compromised at entity-creation time can
+> retain the identity key and forge that entity's signatures indefinitely, and
+> nothing downstream can tell. Signing defends against a relay that is honest
+> when an entity is created and compromised later — which is a real and useful
+> property, and a narrower one than the sentence above reads as.
+>
+> ⚠️ **THE TWO HALVES ARE NOT SYMMETRIC, AND THE ASYMMETRY IS THE POINT.**
+>
+> | | who generates the private key | server ever holds it |
+> | --- | --- | --- |
+> | **X25519 encryption** | the entity | **never** — `POST /entities/encryption-key` accepts a PUBLIC key only, by construction |
+> | **Ed25519 identity** | **the server** | **yes, at creation** |
+>
+> **Confidentiality from the relay is therefore genuine and authenticity is
+> conditional.** That is the opposite of the intuition — signing feels like the
+> simpler guarantee — and it is why this is recorded rather than left for
+> someone to derive.
+>
+> **The fix is that entity creation must accept a CLIENT-GENERATED public key
+> and stop minting pairs**, which makes identity custody match encryption
+> custody. Not done: it changes the creation flow, `bun run bootstrap`, and
+> every test that creates an entity, and it deserves its own increment rather
+> than being appended to one about something else.
+
 **Servers stop needing identities at all.** If authenticity comes entirely from
 signatures, a server is transport. TLS for confidentiality; no server keys, no
 server-to-server trust, no question about what a relay may assert. **A large

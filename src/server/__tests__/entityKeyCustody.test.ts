@@ -43,7 +43,25 @@ const TOKEN = 'custody-token';
 
 let serverHandle: ReturnType<typeof startServer>;
 
-async function post(path: string, body: unknown): Promise<{ status: number; data: any }> {
+/**
+ * The endpoints this file exercises, as a closed set — one, here.
+ *
+ * A `string` parameter made a typo'd path an expectation failure several
+ * assertions later; a union makes it a compile error. Same change as the
+ * encryption-key route tests.
+ *
+ * ⚠️ It does NOT satisfy Codacy's SSRF rule, and is not expected to. That rule
+ * fires on any non-literal first argument to `fetch`, and this is a test
+ * building a URL to its own test server from two local constants. Clearing it
+ * would mean inlining the literal at every call site and deleting the helper —
+ * worse code, to satisfy a rule about production request paths that does not
+ * apply here. Dispositioned on the PR rather than in this file: a source
+ * comment explaining a lint finding is more text for the linter to read, which
+ * is how a disposition went 3 findings to 5 earlier today.
+ */
+type Endpoint = '/accounts/create-entity';
+
+async function post(path: Endpoint, body: unknown): Promise<{ status: number; data: any }> {
   const res = await fetch(`${URL_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -514,15 +514,37 @@ exists, and `/admin/api/directory` is registered and feeds the console.
     constraints; anything behavioural is satisfiable by whatever else happens to
     be holding.** Both directions now mutation-verified: over-drop reddens only
     the structural guard, under-drop reddens it plus three behavioural tests.
-- **KNOWN, not fixed — the migration fixtures in `schema.test.ts` are
-  hand-written and cannot represent a real database.** The v5 fixture stamps
-  version 5 while omitting tables migration 3 creates. Migration 8 hit this and
-  the fix added only the one table it needed; migration 10 walked into the same
-  hole two migrations later. **Fixing the instance left the class.** The general
-  fix is to BUILD each fixture by running migrations 1..N rather than listing
-  tables by hand, so it cannot drift from what that version actually is — the
-  same instinct as deriving CI gates from the workflow instead of maintaining a
-  parallel list.
+- **FIXED at `b44c2ba` (2026-08-27) — was carried here as "KNOWN, not fixed"
+  for six days after it was closed.** The defect: migration fixtures in
+  `schema.test.ts` were hand-written and could not represent a real database.
+  The v5 fixture stamped version 5 while omitting tables migration 3 creates.
+  Migration 8 hit it, the fix added only the one table it needed, and migration
+  10 walked into the same hole two migrations later. **Fixing the instance left
+  the class.**
+  - The fix is the general one this entry called for: `migrationMatrix.test.ts`
+    BUILDS each origin by running the real migrations 1..N, so a fixture cannot
+    drift from what that version actually is. Same instinct as deriving CI gates
+    from the workflow instead of maintaining a parallel list. Measured
+    2026-09-02 at `64e2925`: 19 tests, 0 fail, and the origin list is derived
+    from `CURRENT_SCHEMA_VERSION`, so it extends itself.
+  - ⚠️ **The stale entry is worth more than the fix it described.** This file is
+    the stated source of truth for what is done, and it said a closed defect was
+    open. **A stale "not fixed" is the same hazard as the stale "not built yet"
+    CLAUDE.md warns about, and in the same direction: it invites someone to
+    build a second fix.** The first author of that second fix would have found
+    `migrationMatrix.test.ts` only by accident.
+  - ⚠️ **And this file already said so, 630 lines further down.** Phase 6 opens
+    with *"Migration matrix: DONE, and it maintains itself."* **The document
+    contradicted itself and neither entry knew about the other** — which is
+    worse than staleness, because a reader who lands on the wrong one has no
+    signal to keep looking, and a reader who finds both has no way to tell which
+    is current from the text alone.
+  - **The tell was available without reading either file: the entry named a
+    general fix and a later commit's subject line was that fix.** Nothing
+    connected them, because closing a defect and updating the document that
+    tracks it are two actions and only one of them is satisfying. **The cheap
+    check is a grep for the defect's own noun before filing it as open** — here,
+    "migration matrix" would have returned the contradiction immediately.
 - **Browser sessions (DONE)**: `POST /admin/api/session/create` exchanges an
   account token for a cookie; `GET /admin/api/session/current` re-supplies the
   CSRF token after a refresh; `POST /admin/api/session/destroy` deletes the row
@@ -1130,14 +1152,63 @@ string. **Zero shell invocations remain anywhere outside the gates script.**
 > to `sh -c` can. That is the whole difference between the five that stayed and
 > the one that was removed.
 
-### Phase 5 — Federation (NOT STARTED, and absent from this file until now)
+### Phase 5 — Federation (DESIGNED at `64e2925`; first increment building)
 
-Specified in `DESIGN.md` (Phase 5: Federation) and never given a ROADMAP
-section, so the one entirely-unbuilt phase was also the one this document did
-not mention. Nothing here has been designed against, scoped, or estimated.
+Specified in `DESIGN.md` (Phase 5: Federation) and for a long time never given a
+ROADMAP section, so the one entirely-unbuilt phase was also the one this
+document did not mention. **That is no longer true and this heading has been
+corrected rather than left to age** — it is the same defect as the stale
+"KNOWN, not fixed" corrected under Phase 4 above.
 
-It is the largest outstanding item in the project by a wide margin, and every
-"pre-alpha, not ready to deploy" statement rests on it.
+**Designed in `DESIGN-FEDERATION.md`**, merged as PR #9. Two tiers of key: an
+account key held by the human, vouching for entity keys held by agents.
+Discovery and key distribution ride the account holder's own forge repository.
+Three items **dissolved rather than being built** — retention, entity transfer,
+and countersigned rotation — each because a decision elsewhere removed the
+problem instead of answering it.
+
+#### 5.1 Message sealing — DONE at `33dd549`
+
+**RULED by CireSnave 2026-09-02: encrypt messages.** Built as ephemeral-static
+ECDH (libsodium's `crypto_box_seal` shape) in `src/crypto/sealing.ts`.
+
+- **Entities now carry a second keypair, X25519, because Ed25519 cannot
+  encrypt.** ⚠️ Do not "simplify" this back to one key. Measured on Bun 1.3.14,
+  an Ed25519 public key **imports as X25519 and derives 32 plausible bytes**,
+  while its own private half is refused — **ciphertext the recipient can never
+  open, and every check short of testing AGREEMENT passes.**
+- **`message-encryption.ts` is not superseded and is not the same thing.** It
+  encrypts at rest under `FAM_SERVER_SECRET`, so the server reads everything;
+  sealing is end-to-end, so it reads nothing. Both are wanted. **Say under whose
+  key.**
+- ⚠️ **TWO MUTANTS SURVIVED THE FULL BLACK-BOX SUITE, and one was a total
+  break.** Deriving the content key from 32 zero bytes instead of the ECDH
+  secret leaves every KDF input public — anyone holding an envelope derives its
+  key — **and all ten tests passed.** "A different key cannot open it" passed
+  because the mutant's salt still contained the recipient's public key. **It
+  passed for a reason unrelated to the property it names.** Dropping the
+  key-binding survives symmetrically; each mutant is masked by the half the
+  other keeps, so running them one at a time made both look covered.
+- **No test over `seal`/`open` can separate them** — the distinguishing
+  operation, deriving a key from public inputs alone, is one that API never
+  offers. So the KDF seam is tested directly by holding one input fixed and
+  varying the other, and both mutants now die to the test written for them.
+
+#### Remaining in Phase 5
+
+- **Signing the envelope** — authenticity, still the Ed25519 half. Sealing
+  deliberately says nothing about who sent a message.
+- **Per-recipient content-key wrapping for channels.** `messages.text` is one
+  column; migration 7 split *delivery* per recipient, not *content*. One content
+  key wrapped per recipient, not N ciphertexts.
+- **Wiring into `MessageSendService`**, the single authoritative send path, plus
+  the migration that adds entity encryption keys.
+- **Vouchers and revocations on the wire** — granularity ruled individual, not
+  wildcard: a wildcard would let a FAM compromise mint agents, which is the
+  property the key model exists to remove.
+
+Federation remains the largest outstanding item in the project, and every
+"pre-alpha, not ready to deploy" statement still rests on it.
 
 ### Phase 6 — Test Backlog & Data-Model Fixes
 - **Migration matrix: DONE, and it maintains itself.** `migrationMatrix.test.ts`

@@ -225,3 +225,16 @@ export class UnsupportedFormatVersionError extends FamError {
     );
   }
 }
+
+/**
+ * A sealed message could not be opened.
+ *
+ * Deliberately ONE error for "sealed to a different key" and "altered in
+ * transit". The two are not distinguishable from the ciphertext, and a caller
+ * who could tell them apart would hold an oracle for testing key ownership.
+ */
+export class SealedMessageError extends FamError {
+  constructor(detail: string, cause?: Error) {
+    super(detail, 'SEALED_MESSAGE_UNOPENABLE', 400, cause);
+  }
+}

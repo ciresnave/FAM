@@ -70,6 +70,53 @@ export async function generateSerializedKeyPair(): Promise<SerializedKeyPair> {
   };
 }
 
+/**
+ * Generate a new X25519 key pair for MESSAGE ENCRYPTION.
+ *
+ * SEPARATE FROM THE IDENTITY KEY ABOVE, AND IT HAS TO BE. Ed25519 signs; it
+ * cannot do ECDH, and the failure is silent in the direction that matters.
+ * Measured on Bun 1.3.14:
+ *
+ *   Ed25519 public imported as X25519 (empty usages)  OK
+ *   deriveBits against that imported key              OK, 32 plausible bytes
+ *   Ed25519 PRIVATE imported as X25519                FAIL, "does not meet
+ *                                                     requirements"
+ *
+ * So a sender can encrypt to an Ed25519 public key and get real-looking
+ * ciphertext that its own recipient can never open, because the recipient
+ * cannot import their private half to reproduce the secret. Every check short
+ * of testing AGREEMENT passes. Converting Ed25519 to X25519 birationally is the
+ * other way out; it needs a third-party library and reuses one key across two
+ * algorithms. Two keys is cheaper and duller.
+ */
+export async function generateEncryptionKeyPair(): Promise<KeyPair> {
+  // `as unknown as` because bun-types declares generateKey's return as
+  // CryptoKey; X25519 yields a pair and the two types do not overlap enough for
+  // a direct assertion.
+  const keyPair = (await crypto.subtle.generateKey({ name: 'X25519' }, true, [
+    'deriveBits',
+  ])) as unknown as CryptoKeyPair;
+
+  const publicKeyBuffer = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+  const privateKeyBuffer = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+
+  return {
+    publicKey: new Uint8Array(publicKeyBuffer),
+    privateKey: new Uint8Array(privateKeyBuffer),
+  };
+}
+
+/**
+ * Generate an encryption key pair and return base64-encoded strings.
+ */
+export async function generateSerializedEncryptionKeyPair(): Promise<SerializedKeyPair> {
+  const keyPair = await generateEncryptionKeyPair();
+  return {
+    publicKey: bufferToBase64(keyPair.publicKey),
+    privateKey: bufferToBase64(keyPair.privateKey),
+  };
+}
+
 // ============================================================================
 // Signing & Verification
 // ============================================================================

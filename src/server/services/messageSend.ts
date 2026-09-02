@@ -27,26 +27,66 @@ import { verifyEnvelope, type SignedEnvelope } from '../../crypto/envelope';
  * rather than returning false, and a 500 for what is plainly a bad request
  * tells the caller the wrong thing about whose fault it is.
  */
-function assertEnvelopeShape(envelope: SignedEnvelope): void {
-  const sealed = envelope?.sealed;
-  const wellFormed =
-    envelope != null &&
-    typeof envelope.sender === 'string' &&
-    typeof envelope.recipient === 'string' &&
-    typeof envelope.sentAt === 'string' &&
-    typeof envelope.sequence === 'number' &&
-    typeof envelope.signature === 'string' &&
-    typeof envelope.version === 'number' &&
-    sealed != null &&
-    typeof sealed.ephemeralPublicKey === 'string' &&
-    typeof sealed.iv === 'string' &&
-    typeof sealed.ciphertext === 'string' &&
-    typeof sealed.version === 'number';
+const ENVELOPE_FIELDS = {
+  version: 'number',
+  sender: 'string',
+  recipient: 'string',
+  sentAt: 'string',
+  sequence: 'number',
+  signature: 'string',
+} as const;
 
-  if (!wellFormed) {
+const SEALED_BODY_FIELDS = {
+  version: 'number',
+  ephemeralPublicKey: 'string',
+  iv: 'string',
+  ciphertext: 'string',
+} as const;
+
+/** Field names whose value is absent or the wrong type. All of them, not the first. */
+function fieldsFailing(value: unknown, spec: Record<string, string>): string[] {
+  if (value == null || typeof value !== 'object') return Object.keys(spec);
+  const obj = value as Record<string, unknown>;
+  return Object.entries(spec)
+    .filter(([field, expected]) => typeof obj[field] !== expected)
+    .map(([field]) => field);
+}
+
+function assertEnvelopeShape(envelope: SignedEnvelope): void {
+  const bad = [
+    ...fieldsFailing(envelope, ENVELOPE_FIELDS),
+    ...fieldsFailing(envelope?.sealed, SEALED_BODY_FIELDS).map((f) => `sealed.${f}`),
+  ];
+
+  if (bad.length > 0) {
+    // Names every bad field rather than the first. A caller fixing one at a
+    // time against a validator that stops early makes a round trip per field,
+    // and the previous flat conjunction could not report any of them.
+    throw new ValidationError(`Malformed sealed envelope: missing or wrong type: ${bad.join(', ')}.`);
+  }
+}
+
+/**
+ * The envelope's own addressing must match how FAM is routing it.
+ *
+ * NOT a forgery check — the signature may be perfectly valid. It is a binding
+ * failure between two layers: the recipient verifies a signature over these
+ * fields, so a mismatch delivers a correctly-verified message that claims to be
+ * from or for someone else. Verifying the signature does not catch it.
+ */
+function assertEnvelopeMatchesRouting(
+  envelope: SignedEnvelope,
+  fromEntityId: EntityId,
+  toEntityId: EntityId
+): void {
+  if (envelope.sender !== fromEntityId) {
     throw new ValidationError(
-      'Malformed sealed envelope: expected version, sender, recipient, sentAt, ' +
-        'sequence, signature and a sealed body with version, ephemeralPublicKey, iv and ciphertext.'
+      `Envelope sender "${envelope.sender}" does not match the sending entity "${fromEntityId}".`
+    );
+  }
+  if (envelope.recipient !== toEntityId) {
+    throw new ValidationError(
+      `Envelope recipient "${envelope.recipient}" does not match the addressed entity "${toEntityId}".`
     );
   }
 }
@@ -146,19 +186,7 @@ export class MessageSendService {
       throw new ForbiddenError('Not permitted to message this entity');
     }
 
-    // The envelope's own addressing must match how FAM is routing it. The
-    // recipient verifies a signature over these fields, so a mismatch means a
-    // correctly-verified message that claims to be from or for someone else.
-    if (envelope.sender !== fromEntityId) {
-      throw new ValidationError(
-        `Envelope sender "${envelope.sender}" does not match the sending entity "${fromEntityId}".`
-      );
-    }
-    if (envelope.recipient !== toEntityId) {
-      throw new ValidationError(
-        `Envelope recipient "${envelope.recipient}" does not match the addressed entity "${toEntityId}".`
-      );
-    }
+    assertEnvelopeMatchesRouting(envelope, fromEntityId, toEntityId);
 
     if (!(await verifyEnvelope(sender.public_key, envelope))) {
       throw new ValidationError(
@@ -201,20 +229,30 @@ export class MessageSendService {
       message_id: message.id,
     } as any);
 
-    const after = this.ctx.entities.getById(toEntityId);
+    return { message, delivery: this.deliveryReportFor(toEntityId, outcome) };
+  }
 
+  /**
+   * Build the delivery report for a completed push.
+   *
+   * ⚠️ READS THE RECIPIENT AFTER THE PUSH, so the reported state is the state
+   * the outcome was decided against rather than a snapshot from before it.
+   * Extracted because both send paths need it identically — two copies of this
+   * would be two things that must stay in sync, and the ordering constraint is
+   * exactly the kind that survives in one copy and quietly does not in the
+   * other.
+   */
+  private deliveryReportFor(toEntityId: EntityId, outcome: PushOutcome): DeliveryReport {
+    const after = this.ctx.entities.getById(toEntityId);
     return {
-      message,
-      delivery: {
-        outcome,
-        recipient: {
-          status: after?.status ?? 'offline',
-          availability: after?.availability ?? 'available',
-          queue_empty: after?.queue_empty ?? null,
-          last_state_change: after?.last_state_change ?? null,
-        },
-        declared_by_recipient: outcome === 'paused',
+      outcome,
+      recipient: {
+        status: after?.status ?? 'offline',
+        availability: after?.availability ?? 'available',
+        queue_empty: after?.queue_empty ?? null,
+        last_state_change: after?.last_state_change ?? null,
       },
+      declared_by_recipient: outcome === 'paused',
     };
   }
 
@@ -291,23 +329,7 @@ export class MessageSendService {
       refs: refs && refs.length > 0 ? this.ctx.messageRefs.listForMessage(message.id) : undefined,
     } as any);
 
-    // Read the recipient AFTER the push, so the reported state is the state
-    // the outcome was decided against rather than a snapshot from before it.
-    const after = this.ctx.entities.getById(toEntityId);
-
-    return {
-      message,
-      delivery: {
-        outcome,
-        recipient: {
-          status: after?.status ?? 'offline',
-          availability: after?.availability ?? 'available',
-          queue_empty: after?.queue_empty ?? null,
-          last_state_change: after?.last_state_change ?? null,
-        },
-        declared_by_recipient: outcome === 'paused',
-      },
-    };
+    return { message, delivery: this.deliveryReportFor(toEntityId, outcome) };
   }
 
   /**

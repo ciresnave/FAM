@@ -104,43 +104,54 @@ export class MessageRefRepository {
     });
   }
 
-  /** Namespaced kind, known mode, string-valued payload. Structure only. */
+  /** Structure only — three independent rules, each readable on its own. */
   private assertShape(input: MessageRefInput): void {
-    const { kind, mode, payload } = input;
+    this.assertNamespacedKind(input.kind);
+    this.assertKnownMode(input.mode);
+    this.assertStringPayload(input.payload);
+  }
 
-    // Namespaced, for the reason context keys are: a bare `ref` would be FAM
-    // asserting a concept it does not have. Written as prose rather than as an
-    // angle-bracket template — a literal that looks like markup is one a static
-    // analyser flags and a future reader has to think about.
-    const namespaced =
+  /**
+   * A kind must carry a namespace.
+   *
+   * For the reason context keys do: a bare `ref` would be FAM asserting a
+   * concept it does not have. Written as prose rather than an angle-bracket
+   * template — a literal that looks like markup is one a static analyser flags
+   * and a future reader has to stop and think about.
+   */
+  private assertNamespacedKind(kind: string): void {
+    const ok =
       typeof kind === 'string' && kind.includes('.') && !kind.startsWith('.') && !kind.endsWith('.');
-    if (!namespaced) {
-      throw new ValidationError(
-        `Reference kind "${kind}" is not namespaced. Use a namespace, a dot, then a ` +
-          'kind — for example "git.ref". FAM does not interpret the namespace; it ' +
-          'exists so the core is never asked to own a concept belonging to an adapter.'
-      );
-    }
+    if (ok) return;
 
-    if (!MODES.includes(mode)) {
-      throw new ValidationError(
-        `Reference mode must be one of ${MODES.join(', ')}. The mode says how a ` +
-          'recipient can CHECK this, and there is no third answer: either they can ' +
-          're-fetch the thing, or they can only re-run the observation.'
-      );
-    }
+    throw new ValidationError(
+      `Reference kind "${kind}" is not namespaced. Use a namespace, a dot, then a ` +
+        'kind — for example "git.ref". FAM does not interpret the namespace; it ' +
+        'exists so the core is never asked to own a concept belonging to an adapter.'
+    );
+  }
 
+  private assertKnownMode(mode: RefMode): void {
+    if (MODES.includes(mode)) return;
+
+    throw new ValidationError(
+      `Reference mode must be one of ${MODES.join(', ')}. The mode says how a ` +
+        'recipient can CHECK this, and there is no third answer: either they can ' +
+        're-fetch the thing, or they can only re-run the observation.'
+    );
+  }
+
+  private assertStringPayload(payload: Record<string, string>): void {
     if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
       throw new ValidationError('Reference payload must be an object of string fields');
     }
 
     for (const [key, value] of Object.entries(payload)) {
-      if (typeof value !== 'string') {
-        throw new ValidationError(
-          `Reference payload field "${key}" is ${typeof value}; only strings are stored. ` +
-            'The core compares these and never interprets them.'
-        );
-      }
+      if (typeof value === 'string') continue;
+      throw new ValidationError(
+        `Reference payload field "${key}" is ${typeof value}; only strings are stored. ` +
+          'The core compares these and never interprets them.'
+      );
     }
   }
 

@@ -10,7 +10,7 @@ import type { DatabaseContext } from '../../db/transaction';
 import type { WebSocketManager } from '../websocket';
 import type { PushOutcome } from '../websocket';
 import type { MessageRefInput } from '../../db/repositories/messageRef';
-import type { Message, EntityId, ChannelId } from '../../types';
+import type { Message, Entity, EntityId, ChannelId } from '../../types';
 import { NotFoundError, ForbiddenError, InsufficientCapabilitiesError, EntityNotInChannelError, ValidationError } from '../../types/errors';
 import { validateEntityId, validateChannelId, validateMessageText } from '../../types/validation';
 import type { PermissionChecker } from './permissionChecker';
@@ -21,17 +21,9 @@ import {
   type SignedGroupEnvelope,
 } from '../../crypto/envelope';
 
-/**
- * Reject anything that is not a well-formed signed envelope.
- *
- * "The server cannot read it" is not "the server accepts anything". An
- * unparseable envelope is undeliverable at every recipient forever, so it is
- * refused at the door rather than persisted as mail nobody can open.
- *
- * Checked before any crypto: `verifyEnvelope` would throw on a missing field
- * rather than returning false, and a 500 for what is plainly a bad request
- * tells the caller the wrong thing about whose fault it is.
- */
+// Envelope shape specs. The doc comment for the check they serve sits on
+// `assertEnvelopeShape` below — an earlier refactor left it stranded here,
+// above constants it does not describe.
 const ENVELOPE_FIELDS = {
   version: 'number',
   sender: 'string',
@@ -79,6 +71,32 @@ const WRAPPED_KEY_FIELDS = {
   wrappedKey: 'string',
 } as const;
 
+/**
+ * A group envelope's own addressing must match how FAM is routing it.
+ *
+ * The channel analogue of `assertEnvelopeMatchesRouting`, and deliberately the
+ * same shape: not a forgery check — the signature may be perfectly valid — but a
+ * binding failure between two layers. A recipient verifies a signature over
+ * these fields, so a mismatch delivers a correctly-verified message claiming to
+ * be from someone else or for a different channel.
+ */
+function assertGroupEnvelopeMatchesRouting(
+  envelope: SignedGroupEnvelope,
+  fromEntityId: EntityId,
+  channelId: ChannelId
+): void {
+  if (envelope.sender !== fromEntityId) {
+    throw new ValidationError(
+      `Envelope sender "${envelope.sender}" does not match the sending entity "${fromEntityId}".`
+    );
+  }
+  if (envelope.channel !== channelId) {
+    throw new ValidationError(
+      `Envelope channel "${envelope.channel}" does not match the addressed channel "${channelId}".`
+    );
+  }
+}
+
 function assertGroupEnvelopeShape(envelope: SignedGroupEnvelope): void {
   const bad = [
     ...fieldsFailing(envelope, GROUP_ENVELOPE_FIELDS),
@@ -105,6 +123,17 @@ function assertGroupEnvelopeShape(envelope: SignedGroupEnvelope): void {
   }
 }
 
+/**
+ * Reject anything that is not a well-formed signed envelope.
+ *
+ * "The server cannot read it" is not "the server accepts anything". An
+ * unparseable envelope is undeliverable at every recipient forever, so it is
+ * refused at the door rather than persisted as mail nobody can open.
+ *
+ * Checked before any crypto: `verifyEnvelope` would throw on a missing field
+ * rather than returning false, and a 500 for what is plainly a bad request
+ * tells the caller the wrong thing about whose fault it is.
+ */
 function assertEnvelopeShape(envelope: SignedEnvelope): void {
   const bad = [
     ...fieldsFailing(envelope, ENVELOPE_FIELDS),
@@ -429,17 +458,7 @@ export class MessageSendService {
 
     const sender = this.ctx.entities.getById(fromEntityId)!;
 
-    if (envelope.sender !== fromEntityId) {
-      throw new ValidationError(
-        `Envelope sender "${envelope.sender}" does not match the sending entity "${fromEntityId}".`
-      );
-    }
-    if (envelope.channel !== channelId) {
-      throw new ValidationError(
-        `Envelope channel "${envelope.channel}" does not match the addressed channel "${channelId}".`
-      );
-    }
-
+    assertGroupEnvelopeMatchesRouting(envelope, fromEntityId, channelId);
     this.assertRecipientsMatchMembership(channelId, envelope);
 
     if (!(await verifyGroupEnvelope(sender.public_key, envelope))) {
@@ -473,17 +492,7 @@ export class MessageSendService {
       message_id: message.id,
     };
 
-    const outcomes: PushOutcome[] = [];
-    for (const member of this.ctx.channels.getMembers(channelId)) {
-      if (member.entity_id === fromEntityId) continue;
-
-      const memberEntity = this.ctx.entities.getById(member.entity_id);
-      if (!memberEntity) continue;
-      if (this.permissionChecker.isDeniedByRules(sender, memberEntity)) continue;
-
-      outcomes.push(this.wsManager.pushToEntity(member.entity_id, pushMessage as any));
-    }
-
+    const outcomes = this.fanOutToChannel(channelId, sender, pushMessage);
     return { message, delivery: this.channelDeliveryReport(outcomes) };
   }
 
@@ -534,6 +543,34 @@ export class MessageSendService {
           `Who may read a channel message is the channel's decision, not the sender's.`
       );
     }
+  }
+
+  /**
+   * Push to every online channel member except the sender, skipping members
+   * whose account has denied this sender by rule.
+   *
+   * Extracted because the sealed and plaintext channel paths had this loop
+   * VERBATIM, differing only in the frame. Two copies of a fan-out are two
+   * places the exclusion rules can drift — and the rules here decide who
+   * receives a message, so a drift is a delivery bug that shows up for one
+   * member on one path.
+   */
+  private fanOutToChannel(
+    channelId: ChannelId,
+    sender: Entity,
+    pushMessage: unknown
+  ): PushOutcome[] {
+    const outcomes: PushOutcome[] = [];
+    for (const member of this.ctx.channels.getMembers(channelId)) {
+      if (member.entity_id === sender.id) continue;
+
+      const memberEntity = this.ctx.entities.getById(member.entity_id);
+      if (!memberEntity) continue;
+      if (this.permissionChecker.isDeniedByRules(sender, memberEntity)) continue;
+
+      outcomes.push(this.wsManager.pushToEntity(member.entity_id, pushMessage as any));
+    }
+    return outcomes;
   }
 
   /**
@@ -616,19 +653,7 @@ export class MessageSendService {
       message_id: message.id,
     };
 
-    const members = this.ctx.channels.getMembers(channelId);
-    const outcomes: PushOutcome[] = [];
-    for (const member of members) {
-      if (member.entity_id === fromEntityId) continue;
-
-      const memberEntity = this.ctx.entities.getById(member.entity_id);
-      if (!memberEntity) continue;
-
-      if (this.permissionChecker.isDeniedByRules(sender, memberEntity)) continue;
-
-      const memberOutcome = this.wsManager.pushToEntity(member.entity_id, pushMessage);
-      outcomes.push(memberOutcome);
-    }
+    const outcomes = this.fanOutToChannel(channelId, sender, pushMessage);
 
     // A channel send has one outcome per member, so the single-recipient
     // vocabulary does not fit. Reported as the WEAKEST outcome any member got:

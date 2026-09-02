@@ -11,9 +11,85 @@ import type { WebSocketManager } from '../websocket';
 import type { PushOutcome } from '../websocket';
 import type { MessageRefInput } from '../../db/repositories/messageRef';
 import type { Message, EntityId, ChannelId } from '../../types';
-import { NotFoundError, ForbiddenError, InsufficientCapabilitiesError, EntityNotInChannelError } from '../../types/errors';
+import { NotFoundError, ForbiddenError, InsufficientCapabilitiesError, EntityNotInChannelError, ValidationError } from '../../types/errors';
 import { validateEntityId, validateChannelId, validateMessageText } from '../../types/validation';
 import type { PermissionChecker } from './permissionChecker';
+import { verifyEnvelope, type SignedEnvelope } from '../../crypto/envelope';
+
+/**
+ * Reject anything that is not a well-formed signed envelope.
+ *
+ * "The server cannot read it" is not "the server accepts anything". An
+ * unparseable envelope is undeliverable at every recipient forever, so it is
+ * refused at the door rather than persisted as mail nobody can open.
+ *
+ * Checked before any crypto: `verifyEnvelope` would throw on a missing field
+ * rather than returning false, and a 500 for what is plainly a bad request
+ * tells the caller the wrong thing about whose fault it is.
+ */
+const ENVELOPE_FIELDS = {
+  version: 'number',
+  sender: 'string',
+  recipient: 'string',
+  sentAt: 'string',
+  sequence: 'number',
+  signature: 'string',
+} as const;
+
+const SEALED_BODY_FIELDS = {
+  version: 'number',
+  ephemeralPublicKey: 'string',
+  iv: 'string',
+  ciphertext: 'string',
+} as const;
+
+/** Field names whose value is absent or the wrong type. All of them, not the first. */
+function fieldsFailing(value: unknown, spec: Record<string, string>): string[] {
+  if (value == null || typeof value !== 'object') return Object.keys(spec);
+  const obj = value as Record<string, unknown>;
+  return Object.entries(spec)
+    .filter(([field, expected]) => typeof obj[field] !== expected)
+    .map(([field]) => field);
+}
+
+function assertEnvelopeShape(envelope: SignedEnvelope): void {
+  const bad = [
+    ...fieldsFailing(envelope, ENVELOPE_FIELDS),
+    ...fieldsFailing(envelope?.sealed, SEALED_BODY_FIELDS).map((f) => `sealed.${f}`),
+  ];
+
+  if (bad.length > 0) {
+    // Names every bad field rather than the first. A caller fixing one at a
+    // time against a validator that stops early makes a round trip per field,
+    // and the previous flat conjunction could not report any of them.
+    throw new ValidationError(`Malformed sealed envelope: missing or wrong type: ${bad.join(', ')}.`);
+  }
+}
+
+/**
+ * The envelope's own addressing must match how FAM is routing it.
+ *
+ * NOT a forgery check — the signature may be perfectly valid. It is a binding
+ * failure between two layers: the recipient verifies a signature over these
+ * fields, so a mismatch delivers a correctly-verified message that claims to be
+ * from or for someone else. Verifying the signature does not catch it.
+ */
+function assertEnvelopeMatchesRouting(
+  envelope: SignedEnvelope,
+  fromEntityId: EntityId,
+  toEntityId: EntityId
+): void {
+  if (envelope.sender !== fromEntityId) {
+    throw new ValidationError(
+      `Envelope sender "${envelope.sender}" does not match the sending entity "${fromEntityId}".`
+    );
+  }
+  if (envelope.recipient !== toEntityId) {
+    throw new ValidationError(
+      `Envelope recipient "${envelope.recipient}" does not match the addressed entity "${toEntityId}".`
+    );
+  }
+}
 
 // ============================================================================
 // Message Send Service
@@ -55,6 +131,130 @@ export class MessageSendService {
     private wsManager: WebSocketManager,
     private permissionChecker: PermissionChecker
   ) {}
+
+  /**
+   * Send a direct message the SERVER CANNOT READ.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * ⚠️ THE SERVER DOES NOT SEAL. THE SENDER DOES, AND THIS METHOD TAKES THE
+   * RESULT. Sealing here would mean holding the plaintext at the moment of
+   * encryption — which is what `message-encryption.ts` already does, and is
+   * precisely the property sealing exists to remove. A server-sealing version
+   * would pass every test one could write about envelopes and signatures while
+   * providing none of the guarantee, so the distinction is recorded here rather
+   * than left to be re-derived.
+   * ─────────────────────────────────────────────────────────────────────────
+   *
+   * SEPARATE FROM `sendDirectMessage` ON PURPOSE. One method with an optional
+   * envelope would be a disjunction — sealed if supplied, plaintext otherwise —
+   * and a client bug that dropped the envelope would send plaintext silently
+   * while every test still passed. Two methods make the caller name the path,
+   * and `messages.sealed` records which one accepted the row.
+   *
+   * WHAT THE SERVER CHECKS, and what each check is worth:
+   *
+   *   envelope shape        rejected at the door. "Cannot read it" is not
+   *                         "accepts anything" — an unparseable envelope fails
+   *                         at every recipient forever.
+   *   sender / recipient    must AGREE with the routing. A validly-signed
+   *                         envelope naming different parties is not a forgery,
+   *                         it is a binding failure between two layers, and
+   *                         checking the signature does not catch it.
+   *   signature             input validation ONLY. It has NO security value to
+   *                         the recipient, who must verify independently —
+   *                         that is the entire point of not trusting the relay.
+   *                         Do not let this check become the reason a client
+   *                         skips its own.
+   */
+  async sendSealedDirectMessage(
+    fromEntityId: EntityId,
+    toEntityId: EntityId,
+    envelope: SignedEnvelope
+  ): Promise<SendResult> {
+    validateEntityId(fromEntityId);
+    validateEntityId(toEntityId);
+    assertEnvelopeShape(envelope);
+
+    const sender = this.requireSender(fromEntityId);
+
+    const recipient = this.ctx.entities.getById(toEntityId);
+    if (!recipient) {
+      throw new NotFoundError('Entity', toEntityId);
+    }
+
+    if (!this.permissionChecker.canDirectMessage(sender, recipient)) {
+      throw new ForbiddenError('Not permitted to message this entity');
+    }
+
+    assertEnvelopeMatchesRouting(envelope, fromEntityId, toEntityId);
+
+    if (!(await verifyEnvelope(sender.public_key, envelope))) {
+      throw new ValidationError(
+        'Envelope signature does not verify against the sending entity’s public key.'
+      );
+    }
+
+    // The envelope goes through the SAME at-rest path as any other row. It is
+    // already opaque, so this adds no confidentiality — it keeps storage
+    // uniform, so the read path needs no branch and the two layers have no way
+    // to disagree about how a row was written.
+    const serialised = JSON.stringify(envelope);
+    const storedText = await this.ctx.messages.prepareStoredText(serialised);
+
+    const message = this.ctx.db.transaction(() => {
+      // The race guard. A revocation landing between the check above and this
+      // write would otherwise still produce a stored message — the grant said
+      // no by the time the row existed. Not redundant with the outer check:
+      // that one is the early exit, this one is the invariant.
+      if (!this.permissionChecker.canDirectMessage(sender, recipient)) {
+        throw new ForbiddenError('Not permitted to message this entity');
+      }
+      return this.ctx.messages.insertDirectMessage(
+        fromEntityId, toEntityId, storedText, serialised, { sealed: true }
+      );
+    })();
+
+    // `sealed: true` travels with the push so a client cannot mistake an
+    // envelope for a message body. Without it the recipient would have to guess
+    // from the shape of the text, and a guess that answers wrong displays
+    // ciphertext to a user.
+    const outcome = this.wsManager.pushToEntity(toEntityId, {
+      type: 'message',
+      from: fromEntityId,
+      channel: null,
+      to: toEntityId,
+      text: serialised,
+      sealed: true,
+      timestamp: message.sent_at,
+      message_id: message.id,
+    } as any);
+
+    return { message, delivery: this.deliveryReportFor(toEntityId, outcome) };
+  }
+
+  /**
+   * Build the delivery report for a completed push.
+   *
+   * ⚠️ READS THE RECIPIENT AFTER THE PUSH, so the reported state is the state
+   * the outcome was decided against rather than a snapshot from before it.
+   * Extracted because both send paths need it identically — two copies of this
+   * would be two things that must stay in sync, and the ordering constraint is
+   * exactly the kind that survives in one copy and quietly does not in the
+   * other.
+   */
+  private deliveryReportFor(toEntityId: EntityId, outcome: PushOutcome): DeliveryReport {
+    const after = this.ctx.entities.getById(toEntityId);
+    return {
+      outcome,
+      recipient: {
+        status: after?.status ?? 'offline',
+        availability: after?.availability ?? 'available',
+        queue_empty: after?.queue_empty ?? null,
+        last_state_change: after?.last_state_change ?? null,
+      },
+      declared_by_recipient: outcome === 'paused',
+    };
+  }
 
   /**
    * Send a direct message from one entity to another.
@@ -107,7 +307,7 @@ export class MessageSendService {
         throw new ForbiddenError('Not permitted to message this entity');
       }
       const inserted = this.ctx.messages.insertDirectMessage(
-        fromEntityId, toEntityId, storedText, trimmed
+        fromEntityId, toEntityId, storedText, trimmed, { sealed: false }
       );
       // Inside the transaction, so a message and its references land together
       // or not at all.
@@ -129,23 +329,7 @@ export class MessageSendService {
       refs: refs && refs.length > 0 ? this.ctx.messageRefs.listForMessage(message.id) : undefined,
     } as any);
 
-    // Read the recipient AFTER the push, so the reported state is the state
-    // the outcome was decided against rather than a snapshot from before it.
-    const after = this.ctx.entities.getById(toEntityId);
-
-    return {
-      message,
-      delivery: {
-        outcome,
-        recipient: {
-          status: after?.status ?? 'offline',
-          availability: after?.availability ?? 'available',
-          queue_empty: after?.queue_empty ?? null,
-          last_state_change: after?.last_state_change ?? null,
-        },
-        declared_by_recipient: outcome === 'paused',
-      },
-    };
+    return { message, delivery: this.deliveryReportFor(toEntityId, outcome) };
   }
 
   /**

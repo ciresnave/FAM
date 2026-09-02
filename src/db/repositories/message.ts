@@ -51,14 +51,20 @@ export class MessageRepository {
     fromEntityId: EntityId,
     toEntityId: EntityId,
     storedText: string,
-    plaintext: string
+    plaintext: string,
+    // REQUIRED, with no default, and that is the point. `sealed` records which
+    // send path accepted this row, and a default would let a caller take the
+    // unsealed path without ever naming it — the silent-downgrade shape the
+    // whole column exists to prevent. Making it explicit costs one argument at
+    // two call sites and removes a way to be wrong.
+    opts: { sealed: boolean }
   ): Message {
     const stmt = this.db.prepare(`
-      INSERT INTO messages (from_entity, to_entity, text)
-      VALUES (?, ?, ?)
+      INSERT INTO messages (from_entity, to_entity, text, sealed)
+      VALUES (?, ?, ?, ?)
     `);
 
-    const result = stmt.run(fromEntityId, toEntityId, storedText);
+    const result = stmt.run(fromEntityId, toEntityId, storedText, opts.sealed ? 1 : 0);
     const messageId = result.lastInsertRowid as number;
 
     // One recipient, recorded explicitly so acknowledgement is per-entity.
@@ -80,7 +86,8 @@ export class MessageRepository {
       fromEntityId,
       toEntityId,
       await this.prepareStoredText(text),
-      text
+      text,
+      { sealed: false }
     );
   }
 

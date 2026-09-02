@@ -2,7 +2,7 @@ import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
 import { startServer, stopServer } from '../http';
 import { getDatabaseContext, closeDatabase } from '../../db';
 import { generateKeyPair, bufferToBase64, sign, base64ToBuffer } from '../../crypto/keys';
-import { decryptPrivateKey } from '../../crypto/encrypt';
+import { decryptPrivateKey, encryptPrivateKey } from '../../crypto/encrypt';
 import { hashToken } from '../../auth/oauth';
 
 // ============================================================================
@@ -51,13 +51,26 @@ async function seedSession(entityId: string): Promise<string> {
   return session.id;
 }
 
+/**
+ * Create an entity the way a real client now must: generate the key pair
+ * LOCALLY, send only the public half, and encrypt the private half here under a
+ * passkey the server never sees.
+ *
+ * ⚠️ This helper is not merely adapted to an API change — it is the proof that
+ * the new flow is workable. The server previously minted the pair AND received
+ * the passkey, so a compromise at creation took both. Everything below happens
+ * on the client side of the wire.
+ */
 async function createEntity(
   accountToken: string,
   name: string,
   passkey = 'test-passkey',
   capabilities?: Record<string, boolean>
 ): Promise<{ entity_id: string; public_key: string; encrypted_key_file: any }> {
-  const body: any = { account_token: accountToken, name, type: 'agent', passkey };
+  const keys = await generateKeyPair();
+  const publicKey = bufferToBase64(keys.publicKey);
+
+  const body: any = { account_token: accountToken, name, type: 'agent', public_key: publicKey };
   if (capabilities) body.capabilities = capabilities;
 
   const res = await fetch(`${TEST_SERVER_URL}/accounts/create-entity`, {
@@ -65,9 +78,19 @@ async function createEntity(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
   expect(res.status).toBe(201);
-  return { entity_id: data.entity_id, public_key: data.public_key, encrypted_key_file: data.encrypted_key_file };
+
+  // Local, after the round trip: `encryptPrivateKey` binds the file to the
+  // entity id, which is only known once the server has assigned it.
+  const encryptedKeyFile = await encryptPrivateKey(
+    bufferToBase64(keys.privateKey),
+    passkey,
+    data.entity_id,
+    publicKey
+  );
+
+  return { entity_id: data.entity_id, public_key: publicKey, encrypted_key_file: encryptedKeyFile };
 }
 
 async function authenticateEntity(
@@ -191,48 +214,52 @@ describe('FAM Server Integration', () => {
 
   // -- Entity Creation ------------------------------------------------------
 
-  test('create-entity with valid token and passkey', async () => {
+  test('create-entity takes a client-generated public key and returns no key file', async () => {
+    const keys = await generateKeyPair();
     const { status, data } = await api('/accounts/create-entity', {
       account_token: testToken,
       name: 'test-agent',
       type: 'agent',
-      passkey: 'my-passkey',
+      public_key: bufferToBase64(keys.publicKey),
     });
 
     expect(status).toBe(201);
     expect(data.entity_id).toBe('test-agent@integration@example.com');
-    expect(data.public_key).toBeDefined();
-    expect(data.encrypted_key_file).toBeDefined();
-    expect(data.encrypted_key_file.kdf).toBe('argon2id');
+    expect(data.public_key).toBe(bufferToBase64(keys.publicKey));
+    // Previously this asserted a key file WAS returned. The server no longer
+    // mints one, because it no longer holds a private key to put in it.
+    expect(data.encrypted_key_file).toBeUndefined();
   });
 
-  test('create-entity fails without passkey', async () => {
+  test('create-entity fails without a public key', async () => {
     const { status, data } = await api('/accounts/create-entity', {
       account_token: testToken,
-      name: 'no-pass',
+      name: 'no-key',
       type: 'agent',
     });
 
     expect(status).toBe(400);
-    expect(data.error).toContain('Passkey is required');
+    expect(data.error).toContain('public_key is required');
   });
 
   test('create-entity fails with bad token', async () => {
+    const keys = await generateKeyPair();
     const { status } = await api('/accounts/create-entity', {
       account_token: 'bad-token',
       name: 'bad-entity',
       type: 'agent',
-      passkey: 'pass',
+      public_key: bufferToBase64(keys.publicKey),
     });
     expect(status).toBe(401);
   });
 
   test('create-entity fails with duplicate name', async () => {
-    const { status, data } = await api('/accounts/create-entity', {
+    const keys = await generateKeyPair();
+    const { status } = await api('/accounts/create-entity', {
       account_token: testToken,
       name: 'test-agent',
       type: 'agent',
-      passkey: 'pass',
+      public_key: bufferToBase64(keys.publicKey),
     });
     expect(status).toBe(409);
   });

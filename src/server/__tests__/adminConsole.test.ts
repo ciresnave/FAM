@@ -24,6 +24,14 @@ const URL_BASE = `http://${TEST_HOST}:${TEST_PORT}`;
 const SECRET = process.env.FAM_SERVER_SECRET!;
 
 const ACCOUNT = 'console@example.com';
+
+/**
+ * A well-formed Ed25519 public key. Entity creation now takes the public half
+ * of a CLIENT-generated pair, so these tests supply one — they are about the
+ * console's auth surface, not about key generation, and a real key here would
+ * only add Argon2 time to tests that never use it.
+ */
+const TEST_PUBLIC_KEY = Buffer.alloc(32, 11).toString('base64');
 const TOKEN = 'console-account-token';
 const OTHER_ACCOUNT = 'other-console@example.com';
 const COMPARE_ACCOUNT = 'compare-console@example.com';
@@ -375,7 +383,7 @@ describe('the console shell', () => {
 describe('managing entities from the console', () => {
   test('an unauthenticated create is refused', async () => {
     const { status } = await post('/accounts/create-entity', {
-      name: 'nope', type: 'agent', passkey: 'x',
+      name: 'nope', type: 'agent', public_key: TEST_PUBLIC_KEY,
     });
     expect(status).toBeGreaterThanOrEqual(400);
   });
@@ -383,7 +391,7 @@ describe('managing entities from the console', () => {
   test('the browser session can create an entity', async () => {
     const { status, json } = await post(
       '/accounts/create-entity',
-      { name: 'from-console', type: 'agent', passkey: 'console-passkey' },
+      { name: 'from-console', type: 'agent', public_key: TEST_PUBLIC_KEY },
       { Cookie: cookie, [CSRF_HEADER]: csrf }
     );
     expect(status).toBe(201);
@@ -393,7 +401,7 @@ describe('managing entities from the console', () => {
   test('a create with the cookie but NO csrf token is refused', async () => {
     const { status } = await post(
       '/accounts/create-entity',
-      { name: 'forged', type: 'agent', passkey: 'x' },
+      { name: 'forged', type: 'agent', public_key: TEST_PUBLIC_KEY },
       { Cookie: cookie }
     );
     expect(status).toBe(403);

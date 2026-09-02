@@ -22,8 +22,18 @@ import {
   validateEntityId,
   validateEntityType,
 } from '../../types/validation';
-import { generateKeyPair, bufferToBase64 } from '../../crypto/keys';
-import { encryptPrivateKey } from '../../crypto/encrypt';
+// ⚠️ DELIBERATELY NO KEY-GENERATION OR KEY-ENCRYPTION IMPORTS HERE.
+//
+// This file used to import `generateKeyPair` and `encryptPrivateKey` and mint
+// an entity's identity pair server-side. Removing the CALLS was not enough:
+// leaving the imports in scope means the next edit can reach for them without
+// anyone noticing what property that costs.
+//
+// The guarantee this route now provides — the server never holds an entity's
+// private key — is meant to be structural, in the shape `/entities/encryption-key`
+// already had: it accepts a PUBLIC key and there is no code path by which a
+// private one could arrive. An unused import is the difference between a
+// type-level guarantee and a comment asking people not to.
 import { validateAccountToken, requireAccountAuth } from '../middleware/auth';
 import { DEFAULT_SERVER_URL } from '../../config';
 
@@ -190,11 +200,62 @@ export function accountRoutes(ctx: DatabaseContext): Route[] {
         // missing account_token before authenticating anything, so "no
         // credential" and "malformed request" were the same reply.
         const { accountId, body } = await requireAccountAuth(ctx, req);
-        const { name, type, capabilities, passkey } = body;
+        const { name, type, capabilities, public_key, passkey } = body;
 
         if (!name || !type) {
           return new Response(
             JSON.stringify({ error: 'Missing required fields: name, type' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // ⚠️ REFUSED, NOT IGNORED. The passkey used to be sent here so the
+        // server could encrypt a key file it had just minted. It must never
+        // cross the wire again — it is the secret protecting every copy of the
+        // private key. An old client that keeps sending it to a server which
+        // silently drops it would keep doing so forever with no signal.
+        if (passkey !== undefined) {
+          return new Response(
+            JSON.stringify({
+              error:
+                'passkey must not be sent to the server. Generate the key pair locally, ' +
+                'encrypt it with the passkey on your own machine, and send only public_key.',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // ⚠️ REQUIRED, WITH NO SERVER-SIDE FALLBACK. Generating a pair when
+        // none is supplied would leave the vulnerability intact for exactly the
+        // callers that had not been updated — the ones who would not notice.
+        // "Client key if supplied, server key otherwise" is the disjunction
+        // shape, and here it silently restores the property being removed.
+        if (typeof public_key !== 'string' || public_key === '') {
+          return new Response(
+            JSON.stringify({
+              error:
+                'public_key is required: the entity generates its own Ed25519 key pair and ' +
+                'sends the public half. The server no longer mints identity keys.',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const decodedKey = Buffer.from(public_key, 'base64');
+        // Buffer.from SKIPS characters outside the base64 alphabet rather than
+        // throwing, so garbage decodes short instead of failing. Re-encoding and
+        // comparing is what actually detects it.
+        if (decodedKey.toString('base64').replace(/=+$/, '') !== public_key.replace(/=+$/, '')) {
+          return new Response(
+            JSON.stringify({ error: 'public_key must be valid base64.' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (decodedKey.length !== 32) {
+          return new Response(
+            JSON.stringify({
+              error: `public_key must be 32 bytes (raw Ed25519); got ${decodedKey.length}.`,
+            }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
@@ -211,38 +272,18 @@ export function accountRoutes(ctx: DatabaseContext): Route[] {
           throw new ConflictError(`Entity already exists: ${entityId}`);
         }
         
-        // Generate key pair
-        const keyPair = await generateKeyPair();
-        const publicKeyBase64 = bufferToBase64(keyPair.publicKey);
-        const privateKeyBase64 = bufferToBase64(keyPair.privateKey);
-        
-        // Create entity in database
-        const entity = ctx.entities.create(
-          entityId,
-          accountId,
-          type,
-          publicKeyBase64,
-          name,
-          capabilities
-        );
-        
-        // Use provided passkey (required for security)
-        if (!passkey) {
-          throw new ValidationError('Passkey is required for entity creation', 'passkey');
-        }
-        const entityPasskey = passkey;
-        const encryptedKeyFile = await encryptPrivateKey(
-          privateKeyBase64,
-          entityPasskey,
-          entityId,
-          publicKeyBase64
-        );
-        
+        // The entity's public key, verbatim. THE SERVER NEVER SEES A PRIVATE
+        // HALF — which is what makes an envelope signature mean something the
+        // relay could not have produced.
+        ctx.entities.create(entityId, accountId, type, public_key, name, capabilities);
+
+        // No key file in the response, because there is nothing to put in one.
+        // The caller already holds the private key it generated and encrypts it
+        // locally under a passkey the server never learns.
         return new Response(
           JSON.stringify({
             entity_id: entityId,
-            public_key: publicKeyBase64,
-            encrypted_key_file: encryptedKeyFile,
+            public_key,
           }),
           { status: 201, headers: { 'Content-Type': 'application/json' } }
         );

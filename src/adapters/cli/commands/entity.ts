@@ -1,6 +1,7 @@
 // Entity Commands - Create, List, Manage Entities
 
 import { apiRequest, entityRequest } from '../client';
+import { provisionEntity } from '../provision';
 import {
   addEntityCredentials,
   switchEntity,
@@ -25,12 +26,6 @@ interface Entity {
   capabilities: Record<string, boolean>;
   created_at: string;
   last_seen: string | null;
-}
-
-interface CreateEntityResponse {
-  entity_id: string;
-  encrypted_key_file: string;
-  public_key: string;
 }
 
 // ============================================================================
@@ -94,17 +89,19 @@ async function createEntity(
   
   console.log(`Creating entity: ${name}@... (type: ${type})`);
   
-  const response = await apiRequest<CreateEntityResponse>(config, '/accounts/create-entity', {
-    account_token: accountToken,
-    name,
-    type,
-    passkey,
-  });
-  
+  // The key pair is generated HERE and the passkey never leaves this process.
+  // See src/adapters/cli/provision.ts for why.
+  const response = await provisionEntity(config, accountToken, name, type, passkey);
+
   console.log(`\nEntity created: ${response.entity_id}`);
-  
+
   // Save credentials for this entity
-  await addEntityCredentials(response.entity_id, response.encrypted_key_file, config);
+  // Stringified: the store holds a JSON string, read back with JSON.parse.
+  await addEntityCredentials(
+    response.entity_id,
+    JSON.stringify(response.encrypted_key_file),
+    config
+  );
   
   console.log(`Credentials saved. You can now use this entity with FAM commands.`);
 }

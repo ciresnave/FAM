@@ -155,6 +155,9 @@ export class WebSocketManager {
         case 'send':
           await this.handleSendMessage(ws, message);
           break;
+        case 'send_sealed':
+          await this.handleSendSealedMessage(ws, message as any);
+          break;
         case 'heartbeat':
           this.handleHeartbeat(ws);
           break;
@@ -330,6 +333,108 @@ export class WebSocketManager {
   // Message Handling
   // --------------------------------------------------------------------------
   
+  /**
+   * Send a message the server cannot read, over the socket.
+   *
+   * ⚠️ EXISTS BECAUSE HTTP HAVING IT AND WS NOT HAVING IT IS THE SHAPE THIS
+   * REPO ALREADY DECIDED AGAINST. `MessageSendService` is the single
+   * authoritative send path precisely so the two surfaces cannot answer
+   * differently, and a capability present on one and absent on the other is the
+   * version of that divergence nobody files as a bug — neither surface is
+   * WRONG, so nothing looks broken until someone needs it.
+   *
+   * Mirrors `POST /messages/send-sealed` exactly: a separate frame type rather
+   * than a flag on `send`, both fields refused rather than resolved, and no
+   * opinion of its own about envelope validity — shape, binding and signature
+   * all belong to the service.
+   */
+  private async handleSendSealedMessage(
+    ws: any,
+    message: { to?: string; channel?: string; text?: string; envelope?: unknown }
+  ): Promise<void> {
+    const connection = this.findConnectionByWs(ws);
+    if (!connection) return;
+
+    const { entityId } = connection;
+
+    try {
+      entityRateLimiter.check(entityId);
+    } catch {
+      this.systemFrame(ws, entityId, 'Rate limit exceeded. Please slow down.');
+      return;
+    }
+
+    // Both fields present is an AMBIGUITY, and resolving it silently is how the
+    // wrong path gets chosen — the surprised half sends plaintext believing it
+    // sealed.
+    if (message.text !== undefined && message.envelope !== undefined) {
+      this.systemFrame(
+        ws,
+        entityId,
+        'Sent both "text" and "envelope"? Refusing: they name different send paths. ' +
+          'Use type "send" for text, type "send_sealed" for an envelope.'
+      );
+      return;
+    }
+
+    if (!message.envelope) {
+      this.systemFrame(ws, entityId, 'A sealed send requires an envelope.');
+      return;
+    }
+
+    if (!message.to) {
+      // Named as unbuilt rather than malformed: a sealed channel message needs
+      // one content key wrapped per recipient, and a caller reading "must
+      // specify to" would think their frame was wrong.
+      this.systemFrame(
+        ws,
+        entityId,
+        'A sealed send requires "to". Sealed channel messages are not supported yet.'
+      );
+      return;
+    }
+
+    if (!this.sendService) {
+      logger.error('MessageSendService not bound to WebSocketManager');
+      this.systemFrame(ws, entityId, 'Send service unavailable');
+      return;
+    }
+
+    try {
+      const sent = await this.sendService.sendSealedDirectMessage(
+        entityId,
+        message.to,
+        message.envelope as any
+      );
+
+      this.send(ws, {
+        type: 'ack',
+        message_id: sent.message.id,
+        delivery: sent.delivery,
+      });
+    } catch (e) {
+      logger.error('Failed to send sealed message', { entityId, error: e });
+      this.systemFrame(
+        ws,
+        entityId,
+        `Failed to send message: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  }
+
+  /** A system-addressed error frame. Extracted because this file had eight copies. */
+  private systemFrame(ws: any, entityId: string, text: string): void {
+    this.send(ws, {
+      type: 'message',
+      from: 'system',
+      channel: null,
+      to: entityId,
+      text,
+      timestamp: new Date().toISOString(),
+      message_id: 0,
+    });
+  }
+
   private async handleSendMessage(ws: any, message: { to?: string; channel?: string; text: string }): Promise<void> {
     const connection = this.findConnectionByWs(ws);
     if (!connection) return;

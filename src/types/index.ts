@@ -356,6 +356,7 @@ export interface HealthResponse {
 export type WebSocketMessage =
   | WebSocketMessagePush
   | WebSocketMessageSend
+  | WebSocketMessageSendSealed
   | WebSocketMessageHeartbeat
   | WebSocketMessageAck
   | WebSocketMessageInvitation
@@ -376,6 +377,26 @@ export interface WebSocketMessageSend {
   to?: EntityId;
   channel?: ChannelId;
   text: string;
+}
+
+/**
+ * Send a message the server cannot read.
+ *
+ * A SEPARATE FRAME TYPE, not a flag on `send`. "Sealed if an envelope is
+ * present, plaintext otherwise" is a disjunction, and the failure it permits is
+ * a client that meant to seal, didn't, and got an ack anyway. The type name is
+ * what makes the choice explicit.
+ *
+ * `text` is declared here only so sending BOTH can be REFUSED rather than
+ * silently resolved — it is never a valid field on this frame.
+ */
+export interface WebSocketMessageSendSealed {
+  type: 'send_sealed';
+  to?: EntityId;
+  /** Not supported yet: a sealed channel message needs a content key per recipient. */
+  channel?: ChannelId;
+  envelope: unknown;
+  text?: never;
 }
 
 export interface WebSocketMessageHeartbeat {

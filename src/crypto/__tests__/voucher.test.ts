@@ -269,6 +269,65 @@ describe('revocation, and which record wins', () => {
     expect(resolved.status).toBe('revoked');
   });
 
+  test('⚠️ AT EQUAL SEQUENCE A REVOCATION WINS, in either order', async () => {
+    // ⚠️ FOUND BY ENUMERATING THE PATHS, prompted by a complexity finding on
+    // this function. The comparison was `record.sequence <= best.sequence`, so
+    // at EQUAL sequence the first record in array order won — and the relay
+    // controls that order, because the relay hands the peer the record list.
+    //
+    // It cannot forge either record. It does not need to: if an account holder
+    // ever issues a voucher and a revocation at the same sequence — a mistake,
+    // but an available one — THE RELAY CHOOSES WHETHER THE ENTITY IS LIVE OR
+    // REVOKED. That is the V3 attack surviving in a corner the rollback test
+    // did not reach, because that test used sequences 1 and 2.
+    //
+    // Resolved by failing CLOSED: a revocation beats a voucher at equal
+    // sequence. A revoked entity treated as live is silent and dangerous; a
+    // live entity treated as revoked is loud and recoverable.
+    const acct = await account();
+    const key = bufferToBase64((await generateKeyPair()).publicKey);
+
+    const voucher = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY, entityPublicKey: key,
+      issuedAt: '2026-09-02T20:00:00.000Z', sequence: 2,
+    });
+    const revocation = await signRevocation(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY,
+      revokedAt: '2026-09-02T20:00:00.000Z', sequence: 2,
+    });
+
+    // BOTH orders, because order-independence is the property under test and a
+    // single ordering cannot demonstrate it.
+    expect((await resolveEntityKey(acct.publicKey, ENTITY, [voucher, revocation])).status).toBe(
+      'revoked'
+    );
+    expect((await resolveEntityKey(acct.publicKey, ENTITY, [revocation, voucher])).status).toBe(
+      'revoked'
+    );
+  });
+
+  test('two vouchers at equal sequence resolve the same way in either order', async () => {
+    // The control for the rule above. Fail-closed on a voucher/revocation tie
+    // must not become "array order decides" for any other tie — if two vouchers
+    // collide the answer must still not depend on who ordered the list.
+    const acct = await account();
+    const keyA = bufferToBase64((await generateKeyPair()).publicKey);
+    const keyB = bufferToBase64((await generateKeyPair()).publicKey);
+
+    const a = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY, entityPublicKey: keyA,
+      issuedAt: '2026-09-02T20:00:00.000Z', sequence: 3,
+    });
+    const b = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY, entityPublicKey: keyB,
+      issuedAt: '2026-09-02T20:00:00.000Z', sequence: 3,
+    });
+
+    const forward = await resolveEntityKey(acct.publicKey, ENTITY, [a, b]);
+    const backward = await resolveEntityKey(acct.publicKey, ENTITY, [b, a]);
+    expect(forward).toEqual(backward);
+  });
+
   test('a later voucher rotates the key', async () => {
     const acct = await account();
     const key1 = bufferToBase64((await generateKeyPair()).publicKey);

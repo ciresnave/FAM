@@ -203,32 +203,83 @@ export async function resolveEntityKey(
   entity: string,
   records: Array<SignedVoucher | SignedRevocation>
 ): Promise<EntityKeyResolution> {
-  let best: { sequence: number; resolution: EntityKeyResolution } | null = null;
+  const candidates = await verifiedCandidates(accountPublicKeyBase64, entity, records);
+  if (candidates.length === 0) return { status: 'unknown' };
+
+  const winner = candidates.reduce((best, next) => (outranks(next, best) ? next : best));
+
+  return winner.kind === 'revocation'
+    ? { status: 'revoked', sequence: winner.sequence }
+    : { status: 'valid', entityPublicKey: winner.entityPublicKey, sequence: winner.sequence };
+}
+
+type Candidate =
+  | { kind: 'revocation'; sequence: number; signature: string }
+  | { kind: 'voucher'; sequence: number; signature: string; entityPublicKey: string };
+
+/**
+ * Records for `entity` whose signature verifies under the account key.
+ *
+ * Split from ranking on purpose. Verification and precedence are two decisions,
+ * and interleaving them is how an unverified record ends up participating in a
+ * comparison — losing is not enough, because a record that participates has
+ * already influenced the outcome.
+ */
+async function verifiedCandidates(
+  accountPublicKeyBase64: string,
+  entity: string,
+  records: Array<SignedVoucher | SignedRevocation>
+): Promise<Candidate[]> {
+  const out: Candidate[] = [];
 
   for (const record of records) {
     if (record.entity !== entity) continue;
 
-    const isRevocation = 'revokedAt' in record;
-    const ok = isRevocation
-      ? await verifyRevocation(accountPublicKeyBase64, record as SignedRevocation)
-      : await verifyVoucher(accountPublicKeyBase64, record as SignedVoucher);
-    if (!ok) continue;
-
-    if (best !== null && record.sequence <= best.sequence) continue;
-
-    best = {
-      sequence: record.sequence,
-      resolution: isRevocation
-        ? { status: 'revoked', sequence: record.sequence }
-        : {
-            status: 'valid',
-            entityPublicKey: (record as SignedVoucher).entityPublicKey,
-            sequence: record.sequence,
-          },
-    };
+    if ('revokedAt' in record) {
+      if (await verifyRevocation(accountPublicKeyBase64, record)) {
+        out.push({ kind: 'revocation', sequence: record.sequence, signature: record.signature });
+      }
+    } else if (await verifyVoucher(accountPublicKeyBase64, record)) {
+      out.push({
+        kind: 'voucher',
+        sequence: record.sequence,
+        signature: record.signature,
+        entityPublicKey: record.entityPublicKey,
+      });
+    }
   }
 
-  return best?.resolution ?? { status: 'unknown' };
+  return out;
+}
+
+/**
+ * A TOTAL order over candidates, so the result cannot depend on list order.
+ *
+ * ⚠️ THIS EXISTS BECAUSE THE FIRST VERSION COMPARED `sequence <= best.sequence`,
+ * which made EQUAL sequences resolve by array position — AND THE RELAY CONTROLS
+ * THAT POSITION, because the relay hands the peer the record list. It cannot
+ * forge either record. It does not need to: if a holder ever issues a voucher
+ * and a revocation at the same sequence, the relay would choose whether the
+ * entity is live or revoked.
+ *
+ * Three rules, in order, and every pair of distinct candidates is separated by
+ * one of them:
+ *
+ *   1. higher sequence wins            — the ordinary case
+ *   2. at a tie, REVOCATION wins       — fail closed. A revoked entity treated
+ *                                        as live is silent and dangerous; a live
+ *                                        entity treated as revoked is loud and
+ *                                        recoverable.
+ *   3. at a tie of the same kind,      — arbitrary but DETERMINISTIC and
+ *      the larger signature wins         relay-independent, so two colliding
+ *                                        vouchers still resolve the same way for
+ *                                        every peer. Which one wins does not
+ *                                        matter; that they agree does.
+ */
+function outranks(x: Candidate, y: Candidate): boolean {
+  if (x.sequence !== y.sequence) return x.sequence > y.sequence;
+  if (x.kind !== y.kind) return x.kind === 'revocation';
+  return x.signature > y.signature;
 }
 
 // ============================================================================

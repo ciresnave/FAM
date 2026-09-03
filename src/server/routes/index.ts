@@ -13,6 +13,7 @@ import { adminSessionRoutes } from './adminSession';
 import { adminUiRoutes } from './adminUi';
 import { taskRoutes } from './tasks';
 import { rulingRoutes } from './rulings';
+import { voucherRoutes } from './vouchers';
 import { PermissionChecker } from '../services/permissionChecker';
 
 // ============================================================================
@@ -51,6 +52,7 @@ export function setupRoutes(
     ...adminUiRoutes(),
     ...taskRoutes(ctx, new PermissionChecker(ctx)),
     ...rulingRoutes(ctx),
+    ...voucherRoutes(ctx),
   ];
   
   return buildRouteMap(allRoutes);

@@ -55,6 +55,7 @@ describe('a voucher binds an entity to a key under the account key', () => {
       entity: ENTITY,
       entityPublicKey: entityKey,
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
     });
 
@@ -71,6 +72,7 @@ describe('a voucher binds an entity to a key under the account key', () => {
       entity: ENTITY,
       entityPublicKey: entityKey,
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
     });
 
@@ -91,6 +93,7 @@ describe('a voucher binds an entity to a key under the account key', () => {
       entity: ENTITY,
       entityPublicKey: real,
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
     });
 
@@ -108,6 +111,7 @@ describe('a voucher binds an entity to a key under the account key', () => {
       entity: ENTITY,
       entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
     });
 
@@ -123,6 +127,7 @@ describe('a voucher binds an entity to a key under the account key', () => {
       entity: ENTITY,
       entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
     };
     const voucher = await signVoucher(acct.privateKey, base);
@@ -144,6 +149,7 @@ describe('field boundaries are unambiguous', () => {
     const common = {
       entityPublicKey: 'AAAA',
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
       version: 1,
     };
@@ -159,6 +165,7 @@ describe('field boundaries are unambiguous', () => {
       entity: ENTITY,
       entityPublicKey: 'AAAA',
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
       version: 1,
     };
@@ -200,6 +207,7 @@ describe('revocation, and which record wins', () => {
     const voucherBytes = canonicalVoucherBytes({
       version: 1, account: 'a', entity: 'e', entityPublicKey: 'k',
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 1,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const revocationBytes = canonicalRevocationBytes({
       version: 1, account: 'a', entity: 'e',
@@ -222,6 +230,7 @@ describe('revocation, and which record wins', () => {
       entity: ENTITY,
       entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence: 1,
     });
 
@@ -237,6 +246,7 @@ describe('revocation, and which record wins', () => {
     const voucher = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: key1,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 1,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const revocation = await signRevocation(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY,
@@ -258,6 +268,7 @@ describe('revocation, and which record wins', () => {
     const voucher = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: key1,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 1,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const revocation = await signRevocation(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY,
@@ -290,6 +301,7 @@ describe('revocation, and which record wins', () => {
     const voucher = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: key,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 2,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const revocation = await signRevocation(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY,
@@ -317,10 +329,12 @@ describe('revocation, and which record wins', () => {
     const a = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: keyA,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 3,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const b = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: keyB,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 3,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
 
     const forward = await resolveEntityKey(acct.publicKey, ENTITY, [a, b]);
@@ -336,10 +350,12 @@ describe('revocation, and which record wins', () => {
     const first = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: key1,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 1,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const second = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: key2,
       issuedAt: '2026-09-02T22:00:00.000Z', sequence: 2,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
 
     const resolved = await resolveEntityKey(acct.publicKey, ENTITY, [second, first]);
@@ -362,10 +378,12 @@ describe('resolution refuses what it cannot verify', () => {
     const real = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: realKey,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 1,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const forged = await signVoucher(impostor.privateKey, {
       account: ACCOUNT, entity: ENTITY, entityPublicKey: forgedKey,
       issuedAt: '2026-09-02T23:00:00.000Z', sequence: 999,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
 
     const resolved = await resolveEntityKey(acct.publicKey, ENTITY, [real, forged]);
@@ -380,6 +398,7 @@ describe('resolution refuses what it cannot verify', () => {
     const other = await signVoucher(acct.privateKey, {
       account: ACCOUNT, entity: `someone-else@${ACCOUNT}`, entityPublicKey: otherKey,
       issuedAt: '2026-09-02T20:00:00.000Z', sequence: 5,
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
 
     const resolved = await resolveEntityKey(acct.publicKey, ENTITY, [other]);
@@ -402,3 +421,115 @@ function firstField(bytes: Uint8Array): string {
   const len = view.getUint32(0, false);
   return new TextDecoder().decode(bytes.slice(4, 4 + len));
 }
+
+// ============================================================================
+// Expiry — putting a clock on the one attack signatures cannot see.
+//
+// ⚠️ THE RELAY CAN STILL WITHHOLD, and no signature check detects an omission:
+// a server that simply does not hand a peer the revocation leaves that peer
+// trusting a revoked key, indefinitely and invisibly. Ordering is handled;
+// ABSENCE cannot be, by any purely local check. SIGNATURE CHECKS ARE EXISTENCE
+// PROOFS AND HAVE NOTHING TO SAY ABOUT ABSENCE.
+//
+// Expiry does not eliminate the censor. It puts a clock on them: withholding
+// only works until the current voucher lapses, after which the relay must
+// supply a fresh one it cannot forge. AN UNDETECTABLE INDEFINITE ATTACK
+// BECOMES A BOUNDED ONE.
+//
+// ⚠️ REVOCATIONS DO NOT EXPIRE, and the asymmetry is deliberate. An expiring
+// revocation would let a revoked entity SILENTLY COME BACK — the failure this
+// whole module exists to prevent, reintroduced by the mechanism meant to
+// bound it. Vouchers are claims that decay; revocations are permanent.
+// ============================================================================
+
+describe('expiry bounds what withholding can achieve', () => {
+  const ISSUED = '2026-09-02T20:00:00.000Z';
+  const EXPIRES = '2026-09-03T20:00:00.000Z';
+  const BEFORE = new Date('2026-09-03T10:00:00.000Z');
+  const AFTER = new Date('2026-09-04T10:00:00.000Z');
+
+  test('a voucher inside its window is valid', async () => {
+    const acct = await account();
+    const key = bufferToBase64((await generateKeyPair()).publicKey);
+    const v = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY, entityPublicKey: key,
+      issuedAt: ISSUED, expiresAt: EXPIRES, sequence: 1,
+    });
+
+    const resolved = await resolveEntityKey(acct.publicKey, ENTITY, [v], BEFORE);
+    expect(resolved.status).toBe('valid');
+  });
+
+  test('past its expiry it is EXPIRED, not valid and not unknown', async () => {
+    // Three outcomes were already distinct; this makes four. "Expired" is a
+    // different fact from "revoked" (the holder did not withdraw it) and from
+    // "unknown" (a voucher exists and was seen). Collapsing expired into
+    // unknown would hide that the peer IS being kept on stale data, which is
+    // the exact signal withholding produces.
+    const acct = await account();
+    const key = bufferToBase64((await generateKeyPair()).publicKey);
+    const v = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY, entityPublicKey: key,
+      issuedAt: ISSUED, expiresAt: EXPIRES, sequence: 1,
+    });
+
+    const resolved = await resolveEntityKey(acct.publicKey, ENTITY, [v], AFTER);
+    expect(resolved.status).toBe('expired');
+  });
+
+  test('⚠️ an expired voucher does NOT fall back to an older unexpired one', async () => {
+    // The tempting bug. If resolution "helpfully" reverted to the newest
+    // still-valid record, a rotation could be UNDONE by waiting: let the new
+    // voucher lapse and the old key becomes current again. The holder rotated
+    // for a reason, possibly because the old key was compromised.
+    //
+    // The winner is chosen FIRST by sequence, and only then checked for
+    // validity. A lapsed winner means lapsed, not "try the runner-up".
+    const acct = await account();
+    const oldKey = bufferToBase64((await generateKeyPair()).publicKey);
+    const newKey = bufferToBase64((await generateKeyPair()).publicKey);
+
+    const older = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY, entityPublicKey: oldKey,
+      issuedAt: ISSUED, expiresAt: '2099-01-01T00:00:00.000Z', sequence: 1,
+    });
+    const newer = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY, entityPublicKey: newKey,
+      issuedAt: ISSUED, expiresAt: EXPIRES, sequence: 2,
+    });
+
+    const resolved = await resolveEntityKey(acct.publicKey, ENTITY, [older, newer], AFTER);
+    expect(resolved.status).toBe('expired');
+  });
+
+  test('a revocation does NOT expire', async () => {
+    // An expiring revocation lets a revoked entity silently come back — the
+    // failure this module exists to prevent, reintroduced by the mechanism
+    // meant to bound a different one.
+    const acct = await account();
+    const r = await signRevocation(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY,
+      revokedAt: ISSUED, sequence: 2,
+    });
+
+    const farFuture = new Date('2099-01-01T00:00:00.000Z');
+    const resolved = await resolveEntityKey(acct.publicKey, ENTITY, [r], farFuture);
+    expect(resolved.status).toBe('revoked');
+  });
+
+  test('changing expiresAt breaks the signature', async () => {
+    // Otherwise the relay extends any voucher indefinitely and the clock is
+    // decorative — which would be worse than no expiry, because the peer would
+    // believe it had a bound.
+    const acct = await account();
+    const v = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ENTITY,
+      entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
+      issuedAt: ISSUED, expiresAt: EXPIRES, sequence: 1,
+    });
+
+    expect(
+      await verifyVoucher(acct.publicKey, { ...v, expiresAt: '2099-01-01T00:00:00.000Z' })
+    ).toBe(false);
+  });
+});

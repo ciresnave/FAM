@@ -61,6 +61,7 @@ describe('voucher storage', () => {
       entity: ENTITY,
       entityPublicKey: entityPublicKey ?? bufferToBase64((await generateKeyPair()).publicKey),
       issuedAt: '2026-09-02T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       sequence,
     });
   }
@@ -180,6 +181,7 @@ describe('voucher storage', () => {
         entity: other,
         entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
         issuedAt: '2026-09-02T20:00:00.000Z',
+        expiresAt: '2099-01-01T00:00:00.000Z',
         sequence: 1,
       })
     );

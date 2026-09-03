@@ -24,6 +24,7 @@
 
 import { Database } from 'bun:sqlite';
 import { ValidationError } from '../../types/errors';
+import { assertRaw32ByteKey } from '../../types/validation';
 
 export type PinObservation =
   /** First sighting. Taken on faith — this is the trust-on-first-use step. */
@@ -46,6 +47,16 @@ export class AccountKeyPinRepository {
    * Never writes over an existing pin. See the class note.
    */
   observe(accountId: string, publicKey: string, url: string): PinObservation {
+    // ⚠️ A PIN THAT HOLDS GARBAGE IS A PERMANENT SILENT FAILURE. Every
+    // later observation of the REAL key would read as `changed` — an alert
+    // about the wrong thing — and the account could never resolve. Guarded here
+    // and in acceptChange, because guarding only one leaves the pin reachable
+    // through the other.
+    assertRaw32ByteKey(publicKey, {
+      field: 'An account key being pinned',
+      why: 'A pin is only as useful as the value in it.',
+    });
+
     const existing = this.getPinned(accountId);
 
     if (existing === null) {
@@ -100,6 +111,11 @@ export class AccountKeyPinRepository {
    * where a human has checked with the holder that the rotation was theirs.
    */
   acceptChange(accountId: string, publicKey: string, url: string): void {
+    assertRaw32ByteKey(publicKey, {
+      field: 'An account key being accepted',
+      why: 'A pin is only as useful as the value in it.',
+    });
+
     const existing = this.getPinned(accountId);
     if (existing === null) {
       throw new ValidationError(

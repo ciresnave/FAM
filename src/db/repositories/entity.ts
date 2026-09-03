@@ -2,7 +2,7 @@
 
 import { Database } from 'bun:sqlite';
 import { QueueNotEmptyError, ValidationError } from '../../types/errors';
-import { assertWithinLimit } from '../../types/validation';
+import { assertWithinLimit, assertRaw32ByteKey } from '../../types/validation';
 
 /** Long enough for a sentence or two of intent; short enough to stay scannable. */
 export const SUMMARY_MAX_LENGTH = 500;
@@ -524,27 +524,13 @@ export class EntityRepository {
     // Size is checked HERE rather than at the crypto call, because a key stored
     // at the wrong length fails much later, inside someone else's send, on a
     // message that is already gone. X25519 public keys are exactly 32 bytes.
-    let decoded: Buffer;
-    try {
-      decoded = Buffer.from(publicKeyBase64, 'base64');
-    } catch {
-      throw new ValidationError('Encryption public key must be base64.');
-    }
-
-    // Buffer.from is permissive: it skips characters outside the base64
-    // alphabet rather than throwing, so garbage decodes to something short
-    // instead of failing. Re-encoding and comparing is what actually detects
-    // it — the length check below would pass for a long enough string of
-    // punctuation.
-    if (decoded.toString('base64').replace(/=+$/, '') !== publicKeyBase64.replace(/=+$/, '')) {
-      throw new ValidationError('Encryption public key must be valid base64.');
-    }
-
-    if (decoded.length !== 32) {
-      throw new ValidationError(
-        `Encryption public key must be 32 bytes (X25519); got ${decoded.length}.`
-      );
-    }
+    // One shared validator. This was the FIRST of what became four copies of
+    // the same rule; collapsing them while they were still identical was the
+    // cheap moment, and after they diverge is the expensive one.
+    assertRaw32ByteKey(publicKeyBase64, {
+      field: 'Encryption public key',
+      why: 'It is the raw X25519 key the entity generated.',
+    });
 
     this.db
       .prepare('UPDATE entities SET encryption_public_key = ? WHERE id = ?')

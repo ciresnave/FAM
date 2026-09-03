@@ -27,6 +27,7 @@
 // left to get wrong.
 
 import { ValidationError } from '../types/errors';
+import { assertRaw32ByteKey } from '../types/validation';
 
 export type Forge = 'github';
 
@@ -123,21 +124,13 @@ export async function fetchAccountKey(
   // holder cannot see from their end.
   const body = (await response.text()).trim();
 
-  const decoded = Buffer.from(body, 'base64');
-  // Buffer.from SKIPS characters outside the base64 alphabet rather than
-  // throwing, so an HTML error page decodes to something short instead of
-  // failing. Re-encoding and comparing is what actually detects it — the length
-  // check alone would pass for a long enough page.
-  if (decoded.toString('base64').replace(/=+$/, '') !== body.replace(/=+$/, '')) {
-    throw new ValidationError(
-      `The account key at ${url} is not valid base64. A key file should contain only the key.`
-    );
-  }
-  if (decoded.length !== 32) {
-    throw new ValidationError(
-      `The account key at ${url} must be 32 bytes (raw Ed25519); got ${decoded.length}.`
-    );
-  }
+  // One shared validator rather than a fourth copy of the same rule. The
+  // round-trip comparison matters here more than anywhere: an HTML error page
+  // decodes to something, and a long enough one decodes to 32 bytes.
+  assertRaw32ByteKey(body, {
+    field: `The account key at ${url}`,
+    why: 'A key file should contain only the key.',
+  });
 
   return { publicKey: body, url };
 }

@@ -158,3 +158,52 @@ describe('migrating a populated v18 database', () => {
     expect(row.v).toBe(CURRENT_SCHEMA_VERSION);
   });
 });
+
+describe('a pin only holds a real key', () => {
+  let db: Database;
+  let ctx: ReturnType<typeof createContext>;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    initializeDatabase(db);
+    ctx = createContext(db);
+    db.prepare('INSERT OR IGNORE INTO accounts (id) VALUES (?)').run(ACCOUNT);
+  });
+
+  afterEach(() => db.close());
+
+  test('⚠️ pinning a malformed key is refused, not stored', async () => {
+    // Found by re-deriving the module before saying "merge it". `observe` took
+    // whatever string it was handed — so garbage could be pinned, and then
+    // reported `unchanged` FOREVER while that account could never resolve.
+    //
+    // A pin that holds a value no key could ever match is a permanent silent
+    // failure: every subsequent observation of the REAL key reads as `changed`,
+    // which is an alert about the wrong thing.
+    for (const bad of ['', 'not base64!!!', Buffer.alloc(16, 1).toString('base64')]) {
+      expect(() => ctx.accountKeyPins.observe(ACCOUNT, bad, URL_A)).toThrow();
+      expect(ctx.accountKeyPins.getPinned(ACCOUNT)).toBeNull();
+    }
+
+    // Control: a well-formed key IS accepted, so the guard is not "refuse all".
+    expect(ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A).status).toBe('pinned');
+  });
+
+  test('a base64 string that decodes to 32 bytes but is not canonical is refused', async () => {
+    // Trips only the round-trip arm: Buffer.from SKIPS non-alphabet characters,
+    // so 44 valid chars with '!!!' spliced in still decodes to 32 bytes and a
+    // length check alone would pass it.
+    const sneaky = KEY_A.slice(0, 10) + '!!!' + KEY_A.slice(10);
+    expect(Buffer.from(sneaky, 'base64').length).toBe(32);
+
+    expect(() => ctx.accountKeyPins.observe(ACCOUNT, sneaky, URL_A)).toThrow(/base64/);
+  });
+
+  test('accepting a malformed key is refused too', async () => {
+    // The other entry point. Guarding only `observe` would leave the pin
+    // reachable through the method that exists to change it.
+    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
+    expect(() => ctx.accountKeyPins.acceptChange(ACCOUNT, 'garbage', URL_A)).toThrow();
+    expect(ctx.accountKeyPins.getPinned(ACCOUNT)).toBe(KEY_A);
+  });
+});

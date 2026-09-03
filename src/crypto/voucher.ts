@@ -52,6 +52,22 @@ export interface VoucherFields {
   entityPublicKey: string;
   issuedAt: string;
   /**
+   * When this voucher stops being evidence. REQUIRED — no optional, no default.
+   *
+   * ⚠️ THIS PUTS A CLOCK ON THE ONE ATTACK SIGNATURES CANNOT SEE. A relay that
+   * withholds a revocation leaves a peer trusting a revoked key, and no
+   * signature check detects an omission: SIGNATURE CHECKS ARE EXISTENCE PROOFS
+   * AND HAVE NOTHING TO SAY ABOUT ABSENCE. Expiry does not remove the censor —
+   * it bounds them. Withholding works only until the current voucher lapses,
+   * after which the relay must produce a fresh one it cannot forge. An
+   * undetectable indefinite attack becomes a bounded one.
+   *
+   * Optional would defeat it: a voucher with no expiry is one the relay can
+   * serve forever, and "expiring unless the issuer omitted it" is the caller's
+   * choice to disable the bound without noticing.
+   */
+  expiresAt: string;
+  /**
    * Monotonic per entity. Resolution is BY SEQUENCE, never by arrival order —
    * a relay that cannot forge can still choose what to show, and replaying a
    * superseded record is the cheapest attack it has.
@@ -81,6 +97,16 @@ export type EntityKeyResolution =
   | { status: 'valid'; entityPublicKey: string; sequence: number }
   | { status: 'revoked'; sequence: number }
   /**
+   * The winning voucher has lapsed.
+   *
+   * ⚠️ DISTINCT FROM BOTH NEIGHBOURS, and the distinction is the signal. Not
+   * `revoked` — the holder did not withdraw it. Not `unknown` — a voucher
+   * exists and was seen. Collapsing it into `unknown` would hide that the peer
+   * IS BEING KEPT ON STALE DATA, which is exactly what withholding produces
+   * and the only trace it leaves.
+   */
+  | { status: 'expired'; sequence: number }
+  /**
    * No verifiable record. Deliberately DISTINCT from `revoked`: "I hold no
    * voucher for this entity" and "this entity was revoked" are different facts,
    * and collapsing them either trusts an unvouched key or reports a revocation
@@ -105,6 +131,7 @@ export function canonicalVoucherBytes(fields: VoucherFields & { version: number 
     fields.entity,
     fields.entityPublicKey,
     fields.issuedAt,
+    fields.expiresAt,
     String(fields.sequence),
   ]);
 }
@@ -201,21 +228,58 @@ export async function verifyRevocation(
 export async function resolveEntityKey(
   accountPublicKeyBase64: string,
   entity: string,
-  records: Array<SignedVoucher | SignedRevocation>
+  records: Array<SignedVoucher | SignedRevocation>,
+  /** Explicit rather than `new Date()`: a clock read inside is untestable. */
+  now: Date = new Date()
 ): Promise<EntityKeyResolution> {
   const candidates = await verifiedCandidates(accountPublicKeyBase64, entity, records);
   if (candidates.length === 0) return { status: 'unknown' };
 
   const winner = candidates.reduce((best, next) => (outranks(next, best) ? next : best));
 
-  return winner.kind === 'revocation'
-    ? { status: 'revoked', sequence: winner.sequence }
-    : { status: 'valid', entityPublicKey: winner.entityPublicKey, sequence: winner.sequence };
+  if (winner.kind === 'revocation') return { status: 'revoked', sequence: winner.sequence };
+
+  // ⚠️ EXPIRY IS CHECKED ON THE WINNER, AFTER RANKING, AND NEVER FALLS BACK.
+  //
+  // Reverting to the newest still-valid record would let a rotation be UNDONE
+  // BY WAITING: let the new voucher lapse and the old key becomes current
+  // again — and the holder may have rotated precisely because the old key was
+  // compromised. A lapsed winner means lapsed, not "try the runner-up".
+  // `!(expiry > now)` rather than `expiry <= now`. `Date.parse` returns NaN on
+  // anything it cannot read, and EVERY comparison with NaN is false — including
+  // the negation — so the direction you write the test in picks the failure
+  // mode outright:
+  //
+  //     if (parsed <= now)    NaN -> does NOT expire   FAILS OPEN
+  //     if (!(parsed > now))  NaN -> DOES expire       FAILS CLOSED
+  //
+  // ⚠️ AND THIS FORM IS CURRENTLY UNREACHABLE FOR THE NaN CASE, MEASURED, not
+  // assumed. `verifiedCandidates` calls `verifyVoucher`, which now rejects an
+  // unparseable expiry, so no candidate reaching here can carry one — reverting
+  // this line to the fails-open form leaves all 25 tests passing.
+  //
+  // Kept anyway, and NOT claimed as independently tested. It costs nothing, and
+  // if the verification guard is ever relaxed or a path appears that does not
+  // go through `verifyVoucher`, the difference between these two forms is
+  // whether that mistake grants permanence or revokes it. The safe direction is
+  // free; the unsafe one is only safe while something else holds.
+  const expiry = Date.parse(winner.expiresAt);
+  if (!(expiry > now.getTime())) {
+    return { status: 'expired', sequence: winner.sequence };
+  }
+
+  return { status: 'valid', entityPublicKey: winner.entityPublicKey, sequence: winner.sequence };
 }
 
 type Candidate =
   | { kind: 'revocation'; sequence: number; signature: string }
-  | { kind: 'voucher'; sequence: number; signature: string; entityPublicKey: string };
+  | {
+      kind: 'voucher';
+      sequence: number;
+      signature: string;
+      entityPublicKey: string;
+      expiresAt: string;
+    };
 
 /**
  * Records for `entity` whose signature verifies under the account key.
@@ -245,6 +309,7 @@ async function verifiedCandidates(
         sequence: record.sequence,
         signature: record.signature,
         entityPublicKey: record.entityPublicKey,
+        expiresAt: record.expiresAt,
       });
     }
   }
@@ -294,6 +359,18 @@ function isWellFormedVoucher(v: SignedVoucher): boolean {
     typeof v.entity === 'string' &&
     typeof v.entityPublicKey === 'string' &&
     typeof v.issuedAt === 'string' &&
+    typeof v.expiresAt === 'string' &&
+    // ⚠️ AND IT MUST PARSE. `typeof === 'string'` accepts "soon", which
+    // `Date.parse` turns into NaN — and NaN loses every comparison, so an
+    // unparseable expiry silently becomes an eternal one. Refused at
+    // verification so it cannot be published; `resolveEntityKey` guards the
+    // same hole independently, for a record that arrived some other way.
+    // ⚠️ AND IT MUST PARSE. `typeof === 'string'` accepts "soon", which
+    // `Date.parse` turns into NaN — and NaN loses every comparison, so an
+    // unparseable expiry silently becomes an eternal one. Refused at
+    // verification so it cannot be published; `resolveEntityKey` guards the
+    // same hole independently, for a record that arrived some other way.
+    !Number.isNaN(Date.parse(v.expiresAt)) &&
     typeof v.sequence === 'number' &&
     typeof v.signature === 'string' &&
     // A voucher has no `revokedAt`. Checked so a revocation handed to

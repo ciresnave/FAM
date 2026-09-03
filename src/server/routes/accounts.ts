@@ -18,6 +18,7 @@ import {
   ValidationError,
 } from '../../types/errors';
 import {
+  assertRaw32ByteKey,
   validateAccountId,
   validateEntityId,
   validateEntityType,
@@ -241,37 +242,29 @@ export function accountRoutes(ctx: DatabaseContext): Route[] {
           );
         }
 
-        const decodedKey = Buffer.from(public_key, 'base64');
-        // Buffer.from SKIPS characters outside the base64 alphabet rather than
-        // throwing, so garbage decodes short instead of failing. Re-encoding and
-        // comparing is what actually detects it.
-        if (decodedKey.toString('base64').replace(/=+$/, '') !== public_key.replace(/=+$/, '')) {
+        // One shared validator rather than a local copy. See
+        // assertRaw32ByteKey: three of these existed and a fourth was about to
+        // be written, and identical copies are cheap to collapse only until
+        // they diverge.
+        try {
+          assertRaw32ByteKey(public_key, {
+            field: 'public_key',
+            why: 'It is the raw Ed25519 key the entity generated.',
+          });
+        } catch (e) {
           return new Response(
-            JSON.stringify({ error: 'public_key must be valid base64.' }),
+            JSON.stringify({ error: e instanceof Error ? e.message : 'Invalid public_key' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
-        if (decodedKey.length !== 32) {
-          return new Response(
-            JSON.stringify({
-              error: `public_key must be 32 bytes (raw Ed25519); got ${decodedKey.length}.`,
-            }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-        
-        // Validate inputs
-        validateEntityType(type);
-        
-        // Generate entity ID
+
         const entityId = `${name}@${accountId}`;
         validateEntityId(entityId);
-        
-        // Check if entity already exists
+
         if (ctx.entities.getById(entityId)) {
           throw new ConflictError(`Entity already exists: ${entityId}`);
         }
-        
+
         // The entity's public key, verbatim. THE SERVER NEVER SEES A PRIVATE
         // HALF — which is what makes an envelope signature mean something the
         // relay could not have produced.

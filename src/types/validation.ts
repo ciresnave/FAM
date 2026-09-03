@@ -200,3 +200,47 @@ export function assertWithinLimit(
     );
   }
 }
+
+/**
+ * Assert that `value` is base64 encoding exactly 32 raw bytes — the size of an
+ * Ed25519 or X25519 key.
+ *
+ * ⚠️ EXTRACTED BECAUSE THERE WERE THREE COPIES AND A FOURTH WAS ABOUT TO BE
+ * WRITTEN. Entity encryption keys, `/accounts/create-entity`'s identity key and
+ * the forge-repo account key each had their own, and account-key pinning needed
+ * the same check again.
+ *
+ * That is the shape flagged on the voucher routes an hour earlier: three copies
+ * of one rule agreeing by coincidence of authorship rather than by
+ * construction. Here the copies were still identical — which is exactly when
+ * collapsing them is cheap, and after they diverge is when it is not.
+ *
+ * ⚠️ THE ROUND-TRIP COMPARISON IS NOT DECORATION. `Buffer.from(x, 'base64')`
+ * SKIPS characters outside the alphabet rather than throwing, so an HTML error
+ * page or a string with punctuation spliced in decodes to something short
+ * instead of failing — and a long enough one decodes to exactly 32 bytes and
+ * passes a length check alone. Re-encoding and comparing is what actually
+ * detects it.
+ */
+export function assertRaw32ByteKey(
+  value: unknown,
+  context: { field: string; why?: string }
+): asserts value is string {
+  const suffix = context.why ? ` ${context.why}` : '';
+
+  if (typeof value !== 'string' || value === '') {
+    throw new ValidationError(`${context.field} is required and must be a base64 string.${suffix}`);
+  }
+
+  const decoded = Buffer.from(value, 'base64');
+
+  if (decoded.toString('base64').replace(/=+$/, '') !== value.replace(/=+$/, '')) {
+    throw new ValidationError(`${context.field} must be valid base64.${suffix}`);
+  }
+
+  if (decoded.length !== 32) {
+    throw new ValidationError(
+      `${context.field} must be 32 bytes when decoded; got ${decoded.length}.${suffix}`
+    );
+  }
+}

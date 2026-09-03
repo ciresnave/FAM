@@ -66,8 +66,29 @@ describe('voucher storage', () => {
     });
   }
 
-  test('the schema version advanced', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(18);
+  test('the table migration 18 adds is present', () => {
+    // ⚠️ THIS ASSERTED `CURRENT_SCHEMA_VERSION === 18` AND BROKE ON MIGRATION 19
+    // — the FOURTH hardcoded version number in this repo, and I wrote it in the
+    // same commit that corrected the third.
+    //
+    // That commit said: "a test that unrelated work must edit is a test that
+    // will eventually be edited without being read." I wrote the principle down
+    // and then wrote the defect three files away, which is the same shape as
+    // stating "expiry must fail closed" and then writing `parsed <= now` two
+    // functions away. STATING A PRINCIPLE IN PROSE DOES NOT INSTALL IT AS A
+    // CHECK.
+    //
+    // Migration 18's job is a TABLE, so that is what is asserted.
+    const tables = (
+      db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
+        name: string;
+      }>
+    ).map((t) => t.name);
+
+    expect(tables).toContain('vouchers');
+    // Control: the reader works, so "contains" is a real check rather than a
+    // comparison against an empty list.
+    expect(tables).toContain('entities');
   });
 
   test('a voucher round trips field for field', async () => {

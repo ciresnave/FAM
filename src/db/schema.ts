@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 18;
+export const CURRENT_SCHEMA_VERSION = 19;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -751,6 +751,41 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // a partial set can only produce a stale answer.
     'CREATE INDEX IF NOT EXISTS idx_vouchers_entity ON vouchers(entity_id)',
     'CREATE INDEX IF NOT EXISTS idx_vouchers_account ON vouchers(account_id)',
+  ],
+
+  19: [
+    // Pinned account keys — trust-on-first-use with change detection.
+    //
+    // Fetching an account key from the holder's forge repo removes the RELAY
+    // from the trust path. It does not tell a peer that the key CAME from
+    // there, nor that the answer has not changed since. Without a pin, an
+    // anchor is a different source rather than a verifiable one, and a
+    // compromised forge account is indistinguishable from a legitimate
+    // rotation.
+    //
+    // ⚠️ ONE ROW PER ACCOUNT, AND `observe` NEVER UPDATES IT. A pin
+    // that moved on a new value would detect nothing — the attack and the
+    // rotation produce the SAME observation, and the entire point is that a
+    // human is asked which one this is. Changing a pin is a separate,
+    // explicit act.
+    //
+    // `first_seen_url` is stored because WHERE a key was seen is part of what
+    // a holder needs to judge a change: the same key from a different URL, or
+    // a different key from the same one, are different stories.
+    `CREATE TABLE IF NOT EXISTS account_key_pins (
+      account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+      public_key TEXT NOT NULL,
+      first_seen_url TEXT NOT NULL,
+      first_seen_at TEXT DEFAULT (datetime('now')),
+      accepted_at TEXT,
+      -- ⚠️ THE OBSERVED-BUT-NOT-ACCEPTED KEY. acceptChange() requires the
+      -- key being accepted to MATCH what was actually seen at the anchor.
+      -- Without this, accepting is just setting a pin with extra ceremony, and
+      -- a caller could pin a key that never came from anywhere — which is the
+      -- attack the pin exists to stop, performed through the remedy.
+      pending_public_key TEXT,
+      pending_seen_url TEXT
+    )`,
   ],
 };
 

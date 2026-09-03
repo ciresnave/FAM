@@ -73,10 +73,20 @@ describe('only the anchor fetch may construct an AnchorFetchedKey', () => {
     // test above pass for a codebase with ten casts in it.
     const sample = `
       const a = something as AnchorFetchedKey;
-      const b = other as AnchorFetchedKey;
+      const b = other as unknown as AnchorFetchedKey;
     `;
     expect(countCasts(sample)).toBe(2);
     expect(countCasts('const c = plain;')).toBe(0);
+
+    // ⚠️ THE ANGLE-BRACKET FORM, which the first version of this detector
+    // MISSED entirely. `.ts` files accept it and it constructs identically.
+    // Measured against the old pattern: 0 hits. A guard that covers one
+    // spelling of an operation does not cover the operation.
+    expect(countCasts('const d = <AnchorFetchedKey>value;')).toBe(1);
+    expect(countCasts('const e = <AnchorFetchedKey>{ publicKey, url };')).toBe(1);
+
+    // And a name that merely starts the same must not count, in either form.
+    expect(countCasts('const f = x as AnchorFetchedKeyV2;')).toBe(0);
   });
 });
 
@@ -88,13 +98,24 @@ describe('only the anchor fetch may construct an AnchorFetchedKey', () => {
  * with it by construction.
  */
 function countCasts(source: string): number {
-  // A negative lookahead rather than a trailing `\b`. ⚠️ Twice today writing
-  // that escape through a shell produced a LITERAL BACKSPACE BYTE (0x08),
-  // giving a regex that matches nothing — and a detector that matches nothing
-  // reports every codebase as clean. The lookahead needs no escape, so it
-  // cannot be mangled the same way, and it says the same thing: not part of a
-  // longer identifier.
-  return (stripComments(source).match(/as\s+AnchorFetchedKey(?![A-Za-z0-9_])/g) ?? []).length;
+  // ⚠️ BOTH CAST SYNTAXES. TypeScript has two, and `.ts` files (no JSX) accept
+  // the angle-bracket form: `<AnchorFetchedKey>value` constructs exactly as
+  // `value as AnchorFetchedKey` does. The first version of this detector
+  // matched only `as`, so the guard could be bypassed by writing the OTHER
+  // spelling of the same operation — measured, not theorised: the angle form
+  // scored 0 against the old pattern.
+  //
+  // A detector for a rule has to cover every syntax that breaks the rule, and
+  // "the way I would write it" is not that set.
+  //
+  // Negative lookahead rather than a trailing `\b`: twice today writing that
+  // escape through a shell produced a LITERAL BACKSPACE BYTE (0x08), giving a
+  // regex matching nothing — and a detector that matches nothing reports every
+  // codebase as clean. The lookahead needs no escape.
+  const text = stripComments(source);
+  const asForm = text.match(/as\s+AnchorFetchedKey(?![A-Za-z0-9_])/g) ?? [];
+  const angleForm = text.match(/<\s*AnchorFetchedKey\s*>/g) ?? [];
+  return asForm.length + angleForm.length;
 }
 
 /**

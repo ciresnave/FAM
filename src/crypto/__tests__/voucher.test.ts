@@ -533,3 +533,79 @@ describe('expiry bounds what withholding can achieve', () => {
     ).toBe(false);
   });
 });
+
+describe('a malformed expiry must FAIL CLOSED', () => {
+  // ⚠️ FOUND WHEN THE PM ASKED "hold if you have anything" BEFORE MERGING, which
+  // made me re-derive the semantics instead of trusting a version I had written
+  // hours earlier. Measured on Bun:
+  //
+  //     Date.parse('not a date')  ->  NaN
+  //     NaN <= now                ->  FALSE
+  //
+  // So `if (Date.parse(expiresAt) <= now)` read an UNPARSEABLE expiry as NOT
+  // EXPIRED. A voucher carrying `expiresAt: "soon"` is well-formed, verifies
+  // under the account key, and never lapses. VALID FOREVER.
+  //
+  // ⚠️ The direction is what makes it serious rather than untidy. The whole
+  // point of expiry is to fail CLOSED — and a bound whose parse failure grants
+  // PERMANENCE is worse than no bound, because the peer believes it has a
+  // clock. Self-inflicted rather than a relay attack, but a holder who typos an
+  // expiry gets an eternal voucher and never finds out.
+  //
+  // TWO guards, answering different questions, each tested alone:
+  //   verifyVoucher    refuses to accept it at all
+  //   resolveEntityKey treats it as expired if it arrived some other way
+  const ACCT_ENTITY = ENTITY;
+
+  test('a malformed expiry never resolves as valid, by whichever guard', async () => {
+    // ⚠️ NAMED FOR WHAT IT ASSERTS, after the first name overstated it. I called
+    // this "resolution treats it as EXPIRED" and it does not: verification
+    // rejects the record first, so resolution returns 'unknown' and never sees
+    // the expiry check at all. Measured — reverting the resolution guard to the
+    // fails-open form leaves every test passing, because the verification guard
+    // masks it.
+    //
+    // The two guards are NOT independently observable, and saying so is the
+    // point. This asserts the property that actually holds: a malformed expiry
+    // does not yield a usable key. Which guard stops it is not something this
+    // test can see, and claiming otherwise would be the sixth masked defence
+    // documented as a virtue today.
+    const acct = await account();
+    const v = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ACCT_ENTITY,
+      entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
+      issuedAt: '2026-09-03T04:00:00.000Z',
+      expiresAt: 'soon',
+      sequence: 1,
+    });
+
+    // Bypasses verifyVoucher's own guard by asking resolution directly, which
+    // is the point: this arm must hold even if a record got in some other way.
+    const resolved = await resolveEntityKey(acct.publicKey, ACCT_ENTITY, [v], new Date());
+    expect(resolved.status).not.toBe('valid');
+  });
+
+  test('verification refuses a voucher whose expiry does not parse', async () => {
+    const acct = await account();
+    const v = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ACCT_ENTITY,
+      entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
+      issuedAt: '2026-09-03T04:00:00.000Z',
+      expiresAt: '',
+      sequence: 1,
+    });
+
+    expect(await verifyVoucher(acct.publicKey, v)).toBe(false);
+
+    // Control: an identical voucher with a PARSEABLE expiry does verify, so the
+    // refusal is about the timestamp and not about the fixture being broken.
+    const ok = await signVoucher(acct.privateKey, {
+      account: ACCOUNT, entity: ACCT_ENTITY,
+      entityPublicKey: bufferToBase64((await generateKeyPair()).publicKey),
+      issuedAt: '2026-09-03T04:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      sequence: 1,
+    });
+    expect(await verifyVoucher(acct.publicKey, ok)).toBe(true);
+  });
+});

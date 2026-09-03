@@ -245,7 +245,26 @@ export async function resolveEntityKey(
   // BY WAITING: let the new voucher lapse and the old key becomes current
   // again — and the holder may have rotated precisely because the old key was
   // compromised. A lapsed winner means lapsed, not "try the runner-up".
-  if (Date.parse(winner.expiresAt) <= now.getTime()) {
+  // `!(expiry > now)` rather than `expiry <= now`. `Date.parse` returns NaN on
+  // anything it cannot read, and EVERY comparison with NaN is false — including
+  // the negation — so the direction you write the test in picks the failure
+  // mode outright:
+  //
+  //     if (parsed <= now)    NaN -> does NOT expire   FAILS OPEN
+  //     if (!(parsed > now))  NaN -> DOES expire       FAILS CLOSED
+  //
+  // ⚠️ AND THIS FORM IS CURRENTLY UNREACHABLE FOR THE NaN CASE, MEASURED, not
+  // assumed. `verifiedCandidates` calls `verifyVoucher`, which now rejects an
+  // unparseable expiry, so no candidate reaching here can carry one — reverting
+  // this line to the fails-open form leaves all 25 tests passing.
+  //
+  // Kept anyway, and NOT claimed as independently tested. It costs nothing, and
+  // if the verification guard is ever relaxed or a path appears that does not
+  // go through `verifyVoucher`, the difference between these two forms is
+  // whether that mistake grants permanence or revokes it. The safe direction is
+  // free; the unsafe one is only safe while something else holds.
+  const expiry = Date.parse(winner.expiresAt);
+  if (!(expiry > now.getTime())) {
     return { status: 'expired', sequence: winner.sequence };
   }
 
@@ -341,6 +360,17 @@ function isWellFormedVoucher(v: SignedVoucher): boolean {
     typeof v.entityPublicKey === 'string' &&
     typeof v.issuedAt === 'string' &&
     typeof v.expiresAt === 'string' &&
+    // ⚠️ AND IT MUST PARSE. `typeof === 'string'` accepts "soon", which
+    // `Date.parse` turns into NaN — and NaN loses every comparison, so an
+    // unparseable expiry silently becomes an eternal one. Refused at
+    // verification so it cannot be published; `resolveEntityKey` guards the
+    // same hole independently, for a record that arrived some other way.
+    // ⚠️ AND IT MUST PARSE. `typeof === 'string'` accepts "soon", which
+    // `Date.parse` turns into NaN — and NaN loses every comparison, so an
+    // unparseable expiry silently becomes an eternal one. Refused at
+    // verification so it cannot be published; `resolveEntityKey` guards the
+    // same hole independently, for a record that arrived some other way.
+    !Number.isNaN(Date.parse(v.expiresAt)) &&
     typeof v.sequence === 'number' &&
     typeof v.signature === 'string' &&
     // A voucher has no `revokedAt`. Checked so a revocation handed to

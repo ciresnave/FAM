@@ -1,4 +1,4 @@
-import { test, expect, describe } from 'bun:test';
+import { test, expect, describe, afterEach } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import {
@@ -60,5 +60,49 @@ describe('default endpoint configuration', () => {
     walk(join(import.meta.dir, '..'));
 
     expect(offenders).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Retention is OFF unless an operator asks for it.
+//
+// RULED 2026-09-02: no retention. DESIGN.md Open Question 4 closed, open since
+// the document was written.
+//
+// A CHANGE, NOT A CONFIRMATION: the default was 30 days and the sweep ran on a
+// timer, so delivered messages had been deleted after a month. Nobody has to
+// opt IN to keeping their own data; an operator who wants a lifetime sets one.
+// ============================================================================
+
+describe('message retention defaults to keeping everything', () => {
+  const original = process.env.FAM_MESSAGE_RETENTION_DAYS;
+  afterEach(() => {
+    if (original === undefined) delete process.env.FAM_MESSAGE_RETENTION_DAYS;
+    else process.env.FAM_MESSAGE_RETENTION_DAYS = original;
+  });
+
+  test('unset means no retention', async () => {
+    delete process.env.FAM_MESSAGE_RETENTION_DAYS;
+    const { messageRetentionDays } = await import('../config');
+    expect(messageRetentionDays()).toBe(0);
+  });
+
+  test('an operator who sets one gets it', async () => {
+    process.env.FAM_MESSAGE_RETENTION_DAYS = '90';
+    const { messageRetentionDays } = await import('../config');
+    expect(messageRetentionDays()).toBe(90);
+  });
+
+  // Deleting on the strength of a typo is the one outcome with no undo.
+  test('a malformed value keeps everything rather than guessing', async () => {
+    process.env.FAM_MESSAGE_RETENTION_DAYS = 'thirty';
+    const { messageRetentionDays } = await import('../config');
+    expect(messageRetentionDays()).toBe(0);
+  });
+
+  test('a negative value keeps everything too', async () => {
+    process.env.FAM_MESSAGE_RETENTION_DAYS = '-5';
+    const { messageRetentionDays } = await import('../config');
+    expect(messageRetentionDays()).toBe(0);
   });
 });

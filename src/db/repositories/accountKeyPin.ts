@@ -25,6 +25,7 @@
 import { Database } from 'bun:sqlite';
 import { ValidationError } from '../../types/errors';
 import { assertRaw32ByteKey } from '../../types/validation';
+import type { AnchorFetchedKey } from '../../types/provenance';
 
 export type PinObservation =
   /** First sighting. Taken on faith — this is the trust-on-first-use step. */
@@ -46,7 +47,13 @@ export class AccountKeyPinRepository {
    *
    * Never writes over an existing pin. See the class note.
    */
-  observe(accountId: string, publicKey: string, url: string): PinObservation {
+  observe(accountId: string, fetched: AnchorFetchedKey): PinObservation {
+    // The branded type is the point: a bare string cannot reach here, so the
+    // ONLY thing that can be pinned is something fetchAccountKey produced.
+    // Shape checks accept a well-formed key from any source; this accepts a key
+    // from one source. See src/types/provenance.ts.
+    const { publicKey, url } = fetched;
+
     // ⚠️ A PIN THAT HOLDS GARBAGE IS A PERMANENT SILENT FAILURE. Every
     // later observation of the REAL key would read as `changed` — an alert
     // about the wrong thing — and the account could never resolve. Guarded here
@@ -110,7 +117,9 @@ export class AccountKeyPinRepository {
    * has to be reached for. The ceremony IS the safeguard — this is the point
    * where a human has checked with the holder that the rotation was theirs.
    */
-  acceptChange(accountId: string, publicKey: string, url: string): void {
+  acceptChange(accountId: string, fetched: AnchorFetchedKey): void {
+    const { publicKey, url } = fetched;
+
     assertRaw32ByteKey(publicKey, {
       field: 'An account key being accepted',
       why: 'A pin is only as useful as the value in it.',

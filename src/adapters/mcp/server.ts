@@ -31,6 +31,11 @@ import { getActiveEntityCredentials } from '../cli/config';
 import { homedir } from 'os';
 import { join } from 'path';
 import { DEFAULT_SERVER_URL, DEFAULT_WS_URL } from '../../config';
+import {
+  sendDirectVia,
+  type DirectSendTransport,
+  type DirectoryEntity,
+} from '../../messaging/directSend';
 
 // ============================================================================
 // Configuration
@@ -146,12 +151,37 @@ function describeDelivery(
 }
 
 /**
- * The git root of the working directory, or null when there is not one.
+ * The MCP adapter's transport for `sendDirectVia`.
  *
- * Two sessions in the same repository but different subdirectories share a
- * checkout and would NOT collide on cwd alone — the root is what makes them
- * visible to each other.
+ * Only the plumbing differs from the CLI's: `FamClient` carries its own entity
+ * id and session, where the CLI passes them explicitly. The POLICY — refuse
+ * rather than downgrade, "not visible" is not "no key", post nothing before
+ * refusing — is not here and must not be, or this adapter and the CLI become
+ * two answers to the same question.
+ *
+ * `refs` ride only on the unsealed path because that is the only path that can
+ * carry them; the handler refuses the sealed-with-refs combination outright
+ * rather than letting them be dropped here.
  */
+function mcpTransport(
+  client: FamClient,
+  refs?: Array<{ kind: string; mode: string; payload: Record<string, string> }>
+): DirectSendTransport {
+  return {
+    async listVisibleEntities(): Promise<DirectoryEntity[]> {
+      return (await client.listEntities()) as unknown as DirectoryEntity[];
+    },
+    async sendSealed(recipientId, envelope) {
+      const res = await client.sendSealedDirectMessage(recipientId, envelope);
+      return { messageId: res.message_id, response: res };
+    },
+    async sendPlaintext(recipientId, text) {
+      const res = await client.sendDirectMessage(recipientId, text, refs);
+      return { messageId: res.message_id, response: res };
+    },
+  };
+}
+
 async function resolveGitRoot(): Promise<string | null> {
   try {
     const proc = Bun.spawn(['git', 'rev-parse', '--show-toplevel'], {
@@ -513,13 +543,67 @@ When you start, proactively list entities and channels to understand who's avail
           }
 
           if (to_entity) {
-            const result = await client.sendDirectMessage(
-              to_entity, text, refs.length ? refs : undefined
+            // ⚠️ SEALED BY DEFAULT, via the SAME policy the CLI uses. The
+            // refusal rule, "not visible is not keyless", and posting nothing
+            // before refusing all live in `sendDirectVia`. Re-deciding them
+            // here is how this adapter would end up sending plaintext where the
+            // CLI refuses — a difference visible only as a message the relay
+            // can read.
+            //
+            // ⚠️ REFS AND SEALING ARE MUTUALLY EXCLUSIVE TODAY, AND THAT IS
+            // SAID OUT LOUD RATHER THAN RESOLVED SILENTLY. `/messages/send-sealed`
+            // accepts no refs: they live in a server-side table this envelope
+            // cannot reach. Sealing and dropping them is data loss; attaching
+            // them is publishing to the relay the very metadata — a sha, a
+            // command, a measured value — that sealing withholds; and sending
+            // plaintext because refs are present is a downgrade chosen by the
+            // presence of an attachment. All three are worse than refusing.
+            if (refs.length > 0) {
+              const canSeal = (await client.listEntities()).find(
+                (e) => e.id === to_entity
+              )?.encryption_public_key;
+
+              if (canSeal) {
+                return {
+                  content: [{
+                    type: 'text' as const,
+                    text:
+                      `${to_entity} can receive sealed messages, and this message carries ` +
+                      `${refs.length} reference(s), which a sealed envelope cannot yet carry. ` +
+                      'Refusing rather than choosing for you: sending it sealed would DROP the ' +
+                      'references, and sending it unsealed would hand the relay the very ' +
+                      'metadata sealing withholds. Send the references in a separate unsealed ' +
+                      'message, or send this one without them.',
+                  }],
+                  isError: true,
+                };
+              }
+            }
+
+            const outcome = await sendDirectVia(
+              mcpTransport(client, refs.length ? refs : undefined),
+              {
+                senderId: credentials.entity_id,
+                senderIdentityPrivateKey: privateKeyBase64,
+                recipientId: to_entity,
+                text,
+                // ⚠️ THE SAME DEFAULT AS THE CLI, and it has to be. An adapter
+                // that downgraded by default while the CLI refused would be
+                // two policies, and the laxer one would win wherever agents
+                // send — which is most of the traffic. The caller opts in with
+                // `allow_plaintext`, exactly as a person types `--plaintext`.
+                allowPlaintext: (args as any).allow_plaintext === true,
+              }
             );
+
+            const result = outcome.response as any;
+            const sealNote = outcome.sealed
+              ? ' Sealed: the server cannot read it.'
+              : ` NOT SEALED: ${outcome.downgradeReason}`;
             return {
               content: [{
                 type: 'text' as const,
-                text: describeDelivery(to_entity, result) +
+                text: describeDelivery(to_entity, result) + sealNote +
                   (durabilityUnchecked
                     ? ` NOTE: durability NOT checked (${durabilityUnchecked}) — the recipient ` +
                       'has the sha but no reachability claim, which is different from a claim ' +

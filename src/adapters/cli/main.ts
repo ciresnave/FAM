@@ -61,8 +61,13 @@ COMMANDS:
     availability <available|unavailable>
                           Pause or resume incoming messages
 
-  send <target> <message> Send a message
+  send <target> <message> Send a message. Direct messages are SEALED by
+                          default: the server cannot read them.
     target:               Entity ID (user@email.com) or channel:name
+    --plaintext           Send unsealed if the recipient has published no
+                          encryption key. Without this, such a send is
+                          REFUSED rather than quietly downgraded.
+                          Channel messages are not sealed yet either way.
 
   history                 Get message history
     --channel <id>        Channel ID
@@ -176,7 +181,7 @@ async function main() {
         if (args.positional.length < 2) {
           fatal('Usage: fam send <target> <message>');
         }
-        await runSendCommand(args.positional[0]!, args.positional.slice(1).join(' '), config);
+        await runSendCommand(args.positional[0]!, args.positional.slice(1).join(' '), config, args.flags);
         break;
         
       case 'history':

@@ -36,6 +36,7 @@ import {
   type DirectSendTransport,
   type DirectoryEntity,
 } from '../../messaging/directSend';
+import { sendChannelVia, type ChannelSendTransport } from '../../messaging/channelSend';
 
 // ============================================================================
 // Configuration
@@ -177,6 +178,26 @@ function mcpTransport(
     },
     async sendPlaintext(recipientId, text) {
       const res = await client.sendDirectMessage(recipientId, text, refs);
+      return { messageId: res.message_id, response: res };
+    },
+  };
+}
+
+/**
+ * The MCP adapter's transport for `sendChannelVia`. Policy is not here, for the
+ * same reason it is not in the direct transport.
+ */
+function mcpChannelTransport(client: FamClient): ChannelSendTransport {
+  return {
+    async listChannelMembers(channelId): Promise<DirectoryEntity[]> {
+      return (await client.listChannelMemberEntities(channelId)) as unknown as DirectoryEntity[];
+    },
+    async sendSealedChannel(channelId, envelope) {
+      const res = await client.sendSealedChannelMessage(channelId, envelope);
+      return { messageId: res.message_id, response: res };
+    },
+    async sendPlaintextChannel(channelId, text) {
+      const res = await client.sendChannelMessage(channelId, text);
       return { messageId: res.message_id, response: res };
     },
   };
@@ -613,9 +634,27 @@ When you start, proactively list entities and channels to understand who's avail
               }],
             };
           } else if (channel_id) {
-            const result = await client.sendChannelMessage(channel_id, text);
+            // ⚠️ ALL-OR-NOTHING, under the same policy as the CLI. Sealing to
+            // the members who happen to have keys leaves the rest holding a
+            // message they can never open while the sender sees success — so a
+            // channel with one keyless member refuses, and names them.
+            const outcome = await sendChannelVia(mcpChannelTransport(client), {
+              senderId: credentials.entity_id,
+              senderIdentityPrivateKey: privateKeyBase64,
+              channelId: channel_id,
+              text,
+              allowPlaintext: (args as any).allow_plaintext === true,
+            });
+
+            const result = outcome.response as any;
+            const sealNote = outcome.sealed
+              ? ' Sealed to every member: the server cannot read it.'
+              : ` NOT SEALED: ${outcome.downgradeReason}`;
             return {
-              content: [{ type: 'text' as const, text: describeDelivery(`channel ${channel_id}`, result) }],
+              content: [{
+                type: 'text' as const,
+                text: describeDelivery(`channel ${channel_id}`, result) + sealNote,
+              }],
             };
           } else {
             return {
@@ -987,7 +1026,8 @@ When you start, proactively list entities and channels to understand who's avail
     mcp,
     client,
     credentials.display_name || credentials.entity_id,
-    encryptionPrivateKey
+    encryptionPrivateKey,
+    credentials.entity_id
   );
   pushHandler.start();
   log('Channel push handler started');

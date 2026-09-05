@@ -19,6 +19,8 @@ import {
   type DirectoryEntity,
   type SendOutcome,
 } from '../../messaging/directSend';
+import { sendChannelVia, type ChannelSendTransport } from '../../messaging/channelSend';
+import type { SignedGroupEnvelope } from '../../crypto/envelope';
 import type { SignedEnvelope } from '../../crypto/envelope';
 
 export type { SendOutcome };
@@ -76,6 +78,79 @@ function cliTransport(
         entity_id: entityId,
         session_id: sessionId,
         to_entity: recipientId,
+        text,
+      });
+      return { messageId: res.message_id, response: res };
+    },
+  };
+}
+
+export interface ChannelSendInput {
+  senderId: string;
+  senderIdentityPrivateKey: string;
+  sessionId: string;
+  channelId: string;
+  text: string;
+  allowPlaintext?: boolean;
+}
+
+/**
+ * Send to a channel, sealing to every member unless that is impossible and the
+ * caller explicitly allowed otherwise.
+ *
+ * The policy is `sendChannelVia`'s, for the same reason the direct one is
+ * shared: the MCP adapter sends to channels too, and "may this be sealed?"
+ * answered in two places is two answers.
+ */
+export async function sendToChannel(
+  config: CliConfig,
+  input: ChannelSendInput
+): Promise<SendOutcome> {
+  const transport = cliChannelTransport(config, input.senderId, input.sessionId);
+
+  return sendChannelVia(transport, {
+    senderId: input.senderId,
+    senderIdentityPrivateKey: input.senderIdentityPrivateKey,
+    channelId: input.channelId,
+    text: input.text,
+    allowPlaintext: input.allowPlaintext,
+  });
+}
+
+function cliChannelTransport(
+  config: CliConfig,
+  entityId: string,
+  sessionId: string
+): ChannelSendTransport {
+  return {
+    async listChannelMembers(channelId: string): Promise<DirectoryEntity[]> {
+      // `scope: 'channel'` returns the members as full entities, which is where
+      // `encryption_public_key` comes from. No second route was needed, and
+      // adding one would have been a second answer to "may A see B".
+      const res = await apiRequest<{ entities: DirectoryEntity[] }>(config, '/entities/list', {
+        entity_id: entityId,
+        session_id: sessionId,
+        scope: 'channel',
+        channel_id: channelId,
+      });
+      return res.entities;
+    },
+
+    async sendSealedChannel(channelId: string, envelope: SignedGroupEnvelope) {
+      const res = await apiRequest<{ message_id: number }>(config, '/messages/send-sealed', {
+        entity_id: entityId,
+        session_id: sessionId,
+        channel_id: channelId,
+        envelope,
+      });
+      return { messageId: res.message_id, response: res };
+    },
+
+    async sendPlaintextChannel(channelId: string, text: string) {
+      const res = await apiRequest<{ message_id: number }>(config, '/messages/send', {
+        entity_id: entityId,
+        session_id: sessionId,
+        channel_id: channelId,
         text,
       });
       return { messageId: res.message_id, response: res };

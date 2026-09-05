@@ -188,3 +188,117 @@ describe('the sender binding is checked, not just the signature', () => {
     expect(result.kind).toBe('unreadable');
   });
 });
+
+// ============================================================================
+// ⚠️ A SEALED CHANNEL MESSAGE IS A DIFFERENT ENVELOPE, AND THE FLAT PATH
+// WITHHOLDS IT.
+//
+// Caught before shipping channel sealing: a group envelope carries `channel`
+// where a flat one carries `recipient`, and its signature covers a different
+// canonical form. Run through the flat path it fails `verifyEnvelope` and is
+// reported as an unverifiable sender — so channel messages would have been
+// sealed, delivered, and unreadable, with the recipient told the SENDER was
+// suspect rather than that the client could not read the format.
+//
+// That is send-without-receive again, inside a single change this time.
+// ============================================================================
+
+describe('a sealed CHANNEL message', () => {
+  test('⚠️ opens for a member, through the group path', async () => {
+    const { sealToMany } = await import('../../crypto/groupSealing');
+    const { signGroupEnvelope } = await import('../../crypto/envelope');
+    const carolEnc = await generateEncryptionKeyPair();
+
+    const sealed = await sealToMany(
+      [
+        { entity: BOB, publicKey: bufferToBase64(bobEnc.publicKey) },
+        { entity: 'carol@example.com', publicKey: bufferToBase64(carolEnc.publicKey) },
+      ],
+      'to the whole room'
+    );
+
+    const envelope = await signGroupEnvelope(bufferToBase64(alice.privateKey), {
+      sender: ALICE,
+      channel: 'room-1',
+      sentAt: new Date().toISOString(),
+      sequence: 1,
+      sealed,
+    });
+
+    const result = await readIncoming(
+      { sealed: true, text: JSON.stringify(envelope), from_entity: ALICE },
+      {
+        recipientEncryptionPrivateKey: bufferToBase64(bobEnc.privateKey),
+        senderIdentityPublicKey: bufferToBase64(alice.publicKey),
+        recipientEntityId: BOB,
+      }
+    );
+
+    expect(result.kind).toBe('opened');
+    if (result.kind !== 'opened') throw new Error('unreachable');
+    expect(result.text).toBe('to the whole room');
+  });
+
+  test('⚠️ a forged group envelope is withheld too', async () => {
+    // The group signature covers the RECIPIENT LIST as well as the body, so a
+    // relay that adds or removes a reader breaks it. Here the simpler case: a
+    // different signer claiming to be Alice.
+    const { sealToMany } = await import('../../crypto/groupSealing');
+    const { signGroupEnvelope } = await import('../../crypto/envelope');
+
+    const sealed = await sealToMany(
+      [{ entity: BOB, publicKey: bufferToBase64(bobEnc.publicKey) }],
+      'GROUP-FORGERY-SENTINEL'
+    );
+
+    const envelope = await signGroupEnvelope(bufferToBase64(mallory.privateKey), {
+      sender: ALICE,
+      channel: 'room-1',
+      sentAt: new Date().toISOString(),
+      sequence: 1,
+      sealed,
+    });
+
+    const result = await readIncoming(
+      { sealed: true, text: JSON.stringify(envelope), from_entity: ALICE },
+      {
+        recipientEncryptionPrivateKey: bufferToBase64(bobEnc.privateKey),
+        senderIdentityPublicKey: bufferToBase64(alice.publicKey),
+        recipientEntityId: BOB,
+      }
+    );
+
+    expect(result.kind).toBe('unreadable');
+    expect(JSON.stringify(result)).not.toContain('GROUP-FORGERY-SENTINEL');
+  });
+
+  test('a member not addressed in the envelope is told so, not shown it', async () => {
+    const { sealToMany } = await import('../../crypto/groupSealing');
+    const { signGroupEnvelope } = await import('../../crypto/envelope');
+    const otherEnc = await generateEncryptionKeyPair();
+
+    const sealed = await sealToMany(
+      [{ entity: 'someone@example.com', publicKey: bufferToBase64(otherEnc.publicKey) }],
+      'not for bob'
+    );
+
+    const envelope = await signGroupEnvelope(bufferToBase64(alice.privateKey), {
+      sender: ALICE,
+      channel: 'room-1',
+      sentAt: new Date().toISOString(),
+      sequence: 1,
+      sealed,
+    });
+
+    const result = await readIncoming(
+      { sealed: true, text: JSON.stringify(envelope), from_entity: ALICE },
+      {
+        recipientEncryptionPrivateKey: bufferToBase64(bobEnc.privateKey),
+        senderIdentityPublicKey: bufferToBase64(alice.publicKey),
+        recipientEntityId: BOB,
+      }
+    );
+
+    expect(result.kind).toBe('unreadable');
+  });
+});

@@ -541,6 +541,44 @@ export class FamClient {
   }
 
   /**
+   * The members of a channel as full ENTITIES, not as membership rows.
+   *
+   * ⚠️ DELIBERATELY DISTINCT FROM `listChannelMembers`, which returns
+   * `ChannelMember` rows — entity id, role, joined_at — and carries NO KEYS.
+   * Sealing needs each member's `encryption_public_key`, and only the entity
+   * representation has it. The two are named apart because a caller that
+   * reached for the membership list and found no keys would most likely
+   * conclude the members have none, which is the silent downgrade again.
+   *
+   * `scope: 'channel'` on `/entities/list` is what carries the keys. No new
+   * route was needed, and adding one would have been a second answer to
+   * "may A see B" — the existing one already enforces that only a member may
+   * enumerate a channel.
+   */
+  async listChannelMemberEntities(channelId: ChannelId): Promise<Entity[]> {
+    const response = await this.request<{ entities: Entity[] }>('/entities/list', {
+      entity_id: this.entityId,
+      scope: 'channel',
+      channel_id: channelId,
+    });
+    return response.entities;
+  }
+
+  /**
+   * Send a sealed channel message: one body, one content key wrapped per member.
+   */
+  async sendSealedChannelMessage(
+    channelId: ChannelId,
+    envelope: unknown
+  ): Promise<SendMessageResponse> {
+    return this.request<SendMessageResponse>('/messages/send-sealed', {
+      entity_id: this.entityId,
+      channel_id: channelId,
+      envelope,
+    });
+  }
+
+  /**
    * Send a channel message.
    */
   async sendChannelMessage(channelId: ChannelId, text: string): Promise<SendMessageResponse> {

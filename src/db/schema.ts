@@ -772,6 +772,26 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
     // `first_seen_url` is stored because WHERE a key was seen is part of what
     // a holder needs to judge a change: the same key from a different URL, or
     // a different key from the same one, are different stories.
+    // ⚠️⚠️ THIS IS **NOT** A RECIPIENT'S TRUST ANCHOR, DESPITE THE NAME.
+    //
+    // This table lives in the SERVER's database. A recipient's trust decision
+    // stored on the relay is the exact property the voucher tier exists to
+    // deny — DESIGN-FEDERATION.md: "A recipient verifies a message by checking
+    // the entity signature, then checking the voucher that binds that entity
+    // key to an account key IT ALREADY HOLDS. **Neither check involves the
+    // server that delivered it.**"
+    //
+    // ⚠️ DO NOT WIRE A VERIFICATION PATH TO THIS TABLE. Recipients pin locally
+    // — see `src/adapters/cli/peerAnchors.ts`, which is the store a client
+    // actually verifies against. This one records what the SERVER observed, for
+    // the server's own purposes.
+    //
+    // The warning is here, at the definition, rather than in a design document,
+    // because that is where the belief forms: a contributor opens the schema,
+    // reads a table named "account key pins", and wires trust to it. They will
+    // not be careless — they will be reading the name, and the name says trust.
+    // Renaming it is the better fix and is a migration; this is the honest
+    // interim, and it should be deleted BY that rename rather than left beside it.
     `CREATE TABLE IF NOT EXISTS account_key_pins (
       account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
       public_key TEXT NOT NULL,

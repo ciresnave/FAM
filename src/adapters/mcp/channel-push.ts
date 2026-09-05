@@ -9,6 +9,7 @@ import type { WebSocketMessagePush } from '../../types';
 import { readIncoming } from '../../messaging/receive';
 import { resolveSenderIdentity } from '../../messaging/senderIdentity';
 import { getPeerAnchorKey } from '../cli/peerAnchors';
+import { loadSeen, recordSeen, REPLAY_WINDOW_MS } from '../cli/seenMessages';
 
 // ============================================================================
 // Channel Push Handler
@@ -28,19 +29,36 @@ export class ChannelPushHandler {
   private encryptionPrivateKey: string | null;
   /** This entity's own id, needed to select its wrapped key in a group envelope. */
   private entityId: string | null;
+  /**
+   * Where the local trust and replay stores live.
+   *
+   * ⚠️ INJECTABLE BECAUSE THE DEFAULTS ARE THE USER'S REAL HOME DIRECTORY, and
+   * a test that does not override them WRITES THERE. That is not hypothetical:
+   * this handler recorded `alice@example.com` into a developer's actual
+   * `~/.fam/seen-messages.json` during a test run, and the NEXT run read it
+   * back and refused a fixture as a replay. The suite passed once and then
+   * failed, with the cause sitting outside the repository entirely.
+   *
+   * The undefined default is deliberate rather than a path constant: passing
+   * `undefined` through to the store keeps ONE definition of where the real
+   * files are, instead of a second copy here that could drift.
+   */
+  private stores: { seenPath?: string; anchorsPath?: string };
 
   constructor(
     mcp: Server,
     client: FamClient,
     entityDisplayName: string,
     encryptionPrivateKey: string | null = null,
-    entityId: string | null = null
+    entityId: string | null = null,
+    stores: { seenPath?: string; anchorsPath?: string } = {}
   ) {
     this.mcp = mcp;
     this.client = client;
     this.entityDisplayName = entityDisplayName;
     this.encryptionPrivateKey = encryptionPrivateKey;
     this.entityId = entityId;
+    this.stores = stores;
   }
 
   /**
@@ -77,7 +95,7 @@ export class ChannelPushHandler {
     const at = entityId.indexOf('@');
     const accountId = at === -1 ? entityId : entityId.slice(at + 1);
 
-    const accountPublicKey = await getPeerAnchorKey(accountId);
+    const accountPublicKey = await getPeerAnchorKey(accountId, this.stores.anchorsPath);
     const serverSuppliedKey = (await this.senderKeyFor(entityId)) || null;
 
     let records: any[] = [];
@@ -147,6 +165,7 @@ export class ChannelPushHandler {
         content = `[not shown] ${identity.reason}`;
       } else {
         vouched = identity.kind === 'vouched';
+        const now = new Date();
         const read = await readIncoming(
           { sealed: message.sealed, text: message.text, from_entity: message.from },
           {
@@ -155,9 +174,25 @@ export class ChannelPushHandler {
             // Required for a CHANNEL message: the group envelope wraps the
             // content key once per member, selected by entity id.
             recipientEntityId: this.entityId,
+            replay: {
+              seen: await loadSeen(now, REPLAY_WINDOW_MS, this.stores.seenPath),
+              now,
+              windowMs: REPLAY_WINDOW_MS,
+            },
           }
         );
-        content = read.kind === 'unreadable' ? `[not shown] ${read.reason}` : read.text;
+
+        if (read.kind === 'opened' && read.seen) {
+          // Recorded only after it OPENED. A message that could not be read is
+          // not evidence of delivery, and recording it would make a genuine
+          // retry look like a replay.
+          await recordSeen(read.seen, now, REPLAY_WINDOW_MS, this.stores.seenPath);
+        }
+
+        content =
+          read.kind === 'unreadable' || read.kind === 'replayed'
+            ? `[not shown] ${read.reason}`
+            : read.text;
       }
 
       await this.pushChannelNotification(content, {

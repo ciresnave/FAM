@@ -83,6 +83,8 @@ async function initKey(
   console.log('');
   console.log('Until it is published, peers cannot fetch it and no voucher you sign');
   console.log('can be verified by anyone else.');
+  console.log('');
+  printNotYetConsultedNotice();
 }
 
 async function vouch(
@@ -137,8 +139,10 @@ async function vouch(
   console.log(`  sequence:  ${record.sequence}`);
   console.log(`  expires:   ${record.expiresAt}`);
   console.log('');
-  console.log('A peer can verify it once your account key is published and they have');
-  console.log('fetched it. Until then the record is stored and unverifiable to them.');
+  console.log('The record is stored. Verifying it also needs your account key published,');
+  console.log('and a peer that has fetched it.');
+  console.log('');
+  printNotYetConsultedNotice();
 }
 
 async function inferAccountId(): Promise<string> {
@@ -163,4 +167,25 @@ async function promptPasskey(): Promise<string> {
       resolve(answer);
     });
   });
+}
+
+/**
+ * ⚠️ SAID BY THE TOOL, NOT ONLY BY THE ROADMAP.
+ *
+ * Minting a voucher nobody reads breaks nothing — it is inert. The one harm
+ * available is a BELIEF: someone runs this, publishes the output, and concludes
+ * their identity is now verifiable. That is the same class as `canReceiveSealed`
+ * reading true while nothing sealed — a false picture of what the system does.
+ *
+ * A PR description cannot correct it, because the belief forms HERE, at the
+ * moment the command succeeds. So the notice lives where the user is.
+ *
+ * DELETE THIS the moment a receive path consults the chain, and not before —
+ * a stale "not yet" is the doc defect this project has already corrected twice.
+ */
+function printNotYetConsultedNotice(): void {
+  console.log('⚠️  NOT YET CONSULTED BY ANY CLIENT. Publishing a voucher does not currently');
+  console.log('    make your identity verifiable: no receive path resolves the chain yet, so');
+  console.log('    recipients still verify signatures against the key the SERVER serves.');
+  console.log('    This command is the first half of that work, not the whole of it.');
 }

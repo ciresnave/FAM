@@ -7,6 +7,8 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { FamClient, AuthenticateResponse } from './client';
 import type { WebSocketMessagePush } from '../../types';
 import { readIncoming } from '../../messaging/receive';
+import { resolveSenderIdentity } from '../../messaging/senderIdentity';
+import { getPeerAnchorKey } from '../cli/peerAnchors';
 
 // ============================================================================
 // Channel Push Handler
@@ -57,6 +59,39 @@ export class ChannelPushHandler {
       return '';
     }
   }
+
+  /**
+   * Which key may this sender's signature be checked against?
+   *
+   * ⚠️ THE DIRECTORY IS THE RELAY'S WORD. `entities.public_key` is a column in
+   * the server's own database; a malicious home server needs nobody's private
+   * key to forge, it simply publishes its own. So the directory value is an
+   * INPUT to `resolveSenderIdentity`, never the answer — and a chain that
+   * resolves to a DIFFERENT key refuses outright, because that disagreement is
+   * the attack rather than a preference.
+   *
+   * The decision lives in `senderIdentity.ts` so this adapter and the CLI
+   * cannot answer it differently. Only the gathering is here.
+   */
+  private async identityFor(entityId: string) {
+    const at = entityId.indexOf('@');
+    const accountId = at === -1 ? entityId : entityId.slice(at + 1);
+
+    const accountPublicKey = await getPeerAnchorKey(accountId);
+    const serverSuppliedKey = (await this.senderKeyFor(entityId)) || null;
+
+    let records: any[] = [];
+    if (accountPublicKey) {
+      try {
+        records = await this.client.listVoucherRecords(entityId);
+      } catch {
+        // A relay that will not answer produces `unvouched`, never a pass.
+        records = [];
+      }
+    }
+
+    return resolveSenderIdentity({ entityId, serverSuppliedKey, accountPublicKey, records });
+  }
   
   /**
    * Start listening for FAM messages and pushing to MCP.
@@ -99,19 +134,31 @@ export class ChannelPushHandler {
       // though someone had written it. And because anyone can seal to a
       // published key, decrypting proves only that the message was addressed
       // here; the signature is what says who wrote it.
-      const read = await readIncoming(
-        { sealed: message.sealed, text: message.text, from_entity: message.from },
-        {
-          recipientEncryptionPrivateKey: this.encryptionPrivateKey,
-          senderIdentityPublicKey: message.sealed ? await this.senderKeyFor(message.from) : '',
-          // Required for a CHANNEL message: the group envelope wraps the
-          // content key once per member, selected by entity id.
-          recipientEntityId: this.entityId,
-        }
-      );
+      const identity = message.sealed
+        ? await this.identityFor(message.from)
+        : ({ kind: 'unvouched', publicKey: '' } as const);
 
-      const content =
-        read.kind === 'unreadable' ? `[not shown] ${read.reason}` : read.text;
+      let content: string;
+      let vouched = false;
+
+      if (identity.kind === 'refused') {
+        // ⚠️ NOTHING IS OPENED. Either the sender could not be established, or
+        // they were and the answer CONTRADICTS the key the relay served.
+        content = `[not shown] ${identity.reason}`;
+      } else {
+        vouched = identity.kind === 'vouched';
+        const read = await readIncoming(
+          { sealed: message.sealed, text: message.text, from_entity: message.from },
+          {
+            recipientEncryptionPrivateKey: this.encryptionPrivateKey,
+            senderIdentityPublicKey: identity.publicKey,
+            // Required for a CHANNEL message: the group envelope wraps the
+            // content key once per member, selected by entity id.
+            recipientEntityId: this.entityId,
+          }
+        );
+        content = read.kind === 'unreadable' ? `[not shown] ${read.reason}` : read.text;
+      }
 
       await this.pushChannelNotification(content, {
         from_entity: message.from,
@@ -125,6 +172,9 @@ export class ChannelPushHandler {
         // inside the feature built to stop references going missing.
         refs: (message as any).refs,
         sealed: message.sealed === true,
+        // Whether the SENDER key was vouched for by their account, or is still
+        // the relay's word. An agent acting on a message deserves to know which.
+        sender_vouched: vouched,
       });
 
       // The LOG shows the rendered content, never `message.text` — that field is

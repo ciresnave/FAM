@@ -7,6 +7,8 @@ import {
   loadEncryptionPrivateKey,
 } from '../client';
 import { readIncoming } from '../../../messaging/receive';
+import { resolveSenderIdentity } from '../../../messaging/senderIdentity';
+import { getPeerAnchorKey } from '../peerAnchors';
 import type { CliConfig } from '../config';
 import type { Message } from '../../../types';
 import { sendDirect, sendToChannel } from '../sendMessage';
@@ -155,6 +157,23 @@ export async function runHistoryCommand(
   );
   const senderKeys = new Map(directory.entities.map((e) => [e.id, e.public_key]));
 
+  // ⚠️ THE DIRECTORY IS THE RELAY'S WORD. Every signature check in FAM used to
+  // terminate at a value the server controls: `entities.public_key` is a column
+  // in the server's own database, served over `/entities/list`. A malicious home
+  // server needs nobody's private key — it publishes its own for an entity and
+  // forges freely, and an INVALID key would be noticed while a VALID substituted
+  // one is undetectable.
+  //
+  // So the directory key is now an INPUT to a decision rather than the answer.
+  // `resolveSenderIdentity` prefers a key the sender's account vouched for, and
+  // REFUSES outright when the two disagree — that disagreement is the attack
+  // this tier exists to detect, and silently preferring the vouched one would
+  // discard the only evidence it happened.
+  const identities = new Map<string, Awaited<ReturnType<typeof resolveSenderIdentity>>>();
+  for (const senderId of new Set(messages.map((m) => m.from_entity))) {
+    identities.set(senderId, await identityFor(config, senderId, senderKeys.get(senderId) ?? null));
+  }
+
   const encryptionPrivateKey = await loadEncryptionPrivateKey(config);
   const { entityId: readerEntityId } = await getEntitySession(config);
 
@@ -172,15 +191,22 @@ export async function runHistoryCommand(
     // so rendering it would have marked every message "[undelivered]" forever.
     console.log(`[${time}] ${from} → ${to}`);
 
+    const identity = identities.get(msg.from_entity)!;
+
+    if (identity.kind === 'refused') {
+      // ⚠️ NOTHING IS OPENED. The identity could not be established, or it was
+      // established and CONTRADICTS what the server served. Either way the
+      // message body is never decrypted into anything a renderer could print.
+      console.log(`  [not shown] ${identity.reason}`);
+      console.log('');
+      continue;
+    }
+
     const read = await readIncoming(
       { sealed: msg.sealed, text: msg.text, from_entity: msg.from_entity },
       {
         recipientEncryptionPrivateKey: encryptionPrivateKey,
-        // A sender absent from the directory cannot be verified, so nothing is
-        // shown for their message. Passing '' rather than skipping the check
-        // keeps the failure on the authenticity path instead of inventing a
-        // fourth outcome that renders unverified content.
-        senderIdentityPublicKey: senderKeys.get(msg.from_entity) ?? '',
+        senderIdentityPublicKey: identity.publicKey,
         // Required for a CHANNEL message: the group envelope wraps the content
         // key once per member and the reader selects its own by entity id.
         recipientEntityId: readerEntityId,
@@ -193,7 +219,12 @@ export async function runHistoryCommand(
         break;
       case 'opened':
         console.log(`  ${read.text}`);
-        console.log('  (sealed — opened here, never readable by the server)');
+        console.log(
+          identity.kind === 'vouched'
+            ? '  (sealed, and the sender key was vouched for by their account — not the relay)'
+            : '  (sealed — opened here, never readable by the server. Sender identity is ' +
+              'UNVOUCHED: still the relay’s word. `fam account trust` to change that.)'
+        );
         break;
       case 'unreadable':
         // ⚠️ THE ENVELOPE IS NEVER PRINTED AS A FALLBACK. Before this, `text`
@@ -206,4 +237,43 @@ export async function runHistoryCommand(
 
     console.log('');
   }
+}
+
+/**
+ * Gather what `resolveSenderIdentity` needs for one sender.
+ *
+ * The DECISION is not here — it lives in `senderIdentity.ts` so the CLI and the
+ * MCP adapter cannot answer "whose key do I trust" differently. This is the
+ * transport half: the locally pinned anchor, and the voucher records the server
+ * holds. The records are fetched from the relay ON PURPOSE — they are signed by
+ * the account key, so a relay can withhold them but cannot forge one, and
+ * withholding produces `unvouched` rather than a wrong answer.
+ */
+async function identityFor(
+  config: CliConfig,
+  senderId: string,
+  serverSuppliedKey: string | null
+) {
+  const at = senderId.indexOf('@');
+  const accountId = at === -1 ? senderId : senderId.slice(at + 1);
+
+  const accountPublicKey = await getPeerAnchorKey(accountId);
+
+  let records: any[] = [];
+  if (accountPublicKey) {
+    // Only worth asking once an anchor is held: without one, no record can be
+    // verified and the answer is `unvouched` regardless.
+    try {
+      const listed = await entityRequest<{ records: any[] }>(config, '/vouchers/list', {
+        subject_entity_id: senderId,
+      });
+      records = listed.records ?? [];
+    } catch {
+      // A relay that cannot or will not answer produces `unvouched`, never a
+      // pass: the absence of records is not evidence of anything.
+      records = [];
+    }
+  }
+
+  return resolveSenderIdentity({ entityId: senderId, serverSuppliedKey, accountPublicKey, records });
 }

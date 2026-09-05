@@ -7,6 +7,12 @@
 // take that authority back.
 
 import { apiRequest } from '../client';
+import { fetchAccountKey, type Forge } from '../../../federation/accountKey';
+import {
+  observePeerAnchor,
+  acceptPeerAnchorChange,
+  getPeerAnchorKey,
+} from '../peerAnchors';
 import {
   generateAccountKey,
   readAccountPrivateKey,
@@ -35,13 +41,19 @@ export async function runAccountCommand(
     case 'vouch':
       await vouch(positional, flags, config);
       break;
+    case 'trust':
+      await trust(positional, flags);
+      break;
     default:
-      console.log('Usage: fam account <init-key|vouch>');
+      console.log('Usage: fam account <init-key|vouch|trust>');
       console.log('');
       console.log('  init-key            Generate this account\'s signing key.');
       console.log('                      Prints the public half and where to publish it.');
       console.log('  vouch <entity_id>   Sign and publish a voucher binding an entity');
       console.log('                      to its identity key.');
+      console.log('  trust <account_id> --github <user>');
+      console.log('                      Fetch and pin a peer account key, so their');
+      console.log('                      messages can be verified without the relay.');
       break;
   }
 }
@@ -83,8 +95,6 @@ async function initKey(
   console.log('');
   console.log('Until it is published, peers cannot fetch it and no voucher you sign');
   console.log('can be verified by anyone else.');
-  console.log('');
-  printNotYetConsultedNotice();
 }
 
 async function vouch(
@@ -139,10 +149,10 @@ async function vouch(
   console.log(`  sequence:  ${record.sequence}`);
   console.log(`  expires:   ${record.expiresAt}`);
   console.log('');
-  console.log('The record is stored. Verifying it also needs your account key published,');
-  console.log('and a peer that has fetched it.');
-  console.log('');
-  printNotYetConsultedNotice();
+  console.log('The record is stored. A peer can now VERIFY it — `fam history` and the MCP');
+  console.log('adapter both resolve the chain — once two more things are true: your account');
+  console.log('key is published at the path above, and that peer has run');
+  console.log('`fam account trust <your-account> --github <you>` to pin it.');
 }
 
 async function inferAccountId(): Promise<string> {
@@ -169,23 +179,73 @@ async function promptPasskey(): Promise<string> {
   });
 }
 
+
 /**
- * ⚠️ SAID BY THE TOOL, NOT ONLY BY THE ROADMAP.
+ * Fetch a peer's account key from their forge and pin it locally.
  *
- * Minting a voucher nobody reads breaks nothing — it is inert. The one harm
- * available is a BELIEF: someone runs this, publishes the output, and concludes
- * their identity is now verifiable. That is the same class as `canReceiveSealed`
- * reading true while nothing sealed — a false picture of what the system does.
+ * ⚠️ FIRST CONTACT IS TAKEN ON FAITH AND THE COMMAND SAYS SO. Trust-on-first-use
+ * that does not tell the user it is trusting on first use is the identity-layer
+ * version of a voucher nobody reads: the guarantee reads as stronger than it is,
+ * and the moment where a person could have checked passes silently.
  *
- * A PR description cannot correct it, because the belief forms HERE, at the
- * moment the command succeeds. So the notice lives where the user is.
- *
- * DELETE THIS the moment a receive path consults the chain, and not before —
- * a stale "not yet" is the doc defect this project has already corrected twice.
+ * ⚠️ AND A CHANGED KEY IS REFUSED, NOT ABSORBED. An attack and a legitimate
+ * rotation produce the SAME observation; the entire value of pinning is that a
+ * human is asked which one this is.
  */
-function printNotYetConsultedNotice(): void {
-  console.log('⚠️  NOT YET CONSULTED BY ANY CLIENT. Publishing a voucher does not currently');
-  console.log('    make your identity verifiable: no receive path resolves the chain yet, so');
-  console.log('    recipients still verify signatures against the key the SERVER serves.');
-  console.log('    This command is the first half of that work, not the whole of it.');
+async function trust(
+  positional: string[],
+  flags: Record<string, string | boolean>
+): Promise<void> {
+  const accountId = positional[0];
+  const username = flags.github as string | undefined;
+
+  if (!accountId || !username) {
+    throw new Error('Usage: fam account trust <account_id> --github <username>');
+  }
+
+  const forge: Forge = 'github';
+  const fetched = await fetchAccountKey({ forge, username }, fetch);
+
+  if (flags['accept-change'] === true) {
+    await acceptPeerAnchorChange(accountId, fetched.publicKey);
+    console.log(`Pin for ${accountId} moved to the key now at their anchor.`);
+    console.log(`  ${fetched.publicKey}`);
+    return;
+  }
+
+  const observation = await observePeerAnchor({
+    accountId,
+    publicKey: fetched.publicKey,
+    url: fetched.url,
+  });
+
+  switch (observation.status) {
+    case 'pinned':
+      console.log(`Pinned an account key for ${accountId}.`);
+      console.log(`  ${observation.publicKey}`);
+      console.log(`  from ${fetched.url}`);
+      console.log('');
+      console.log('⚠️  TAKEN ON FAITH. This is the first key seen for this peer, and nothing');
+      console.log('    here proves the repository is theirs — only that whoever controls it');
+      console.log('    has been consistent. Confirm the username out of band if it matters;');
+      console.log('    a lookalike account is one glyph away and a key comparison is not.');
+      console.log('    Every key AFTER this one is checked against this pin.');
+      break;
+
+    case 'unchanged':
+      console.log(`${accountId}'s account key is unchanged.`);
+      break;
+
+    case 'changed':
+      console.log(`⚠️  THE KEY AT ${accountId}'s ANCHOR HAS CHANGED. Nothing was updated.`);
+      console.log('');
+      console.log(`    pinned:   ${observation.pinned}`);
+      console.log(`    observed: ${observation.observed}`);
+      console.log('');
+      console.log('    This is either a rotation they performed, or a substitution.');
+      console.log('    The two look identical from here, which is why you are being asked.');
+      console.log('    Confirm with them out of band, then re-run with --accept-change.');
+      console.log('    Until then, verification keeps using the pinned key.');
+      break;
+  }
 }

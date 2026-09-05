@@ -590,6 +590,23 @@ export class FamClient {
   }
   
   /**
+   * Every stored voucher/revocation record for an entity.
+   *
+   * ⚠️ FETCHED FROM THE RELAY ON PURPOSE. The records are signed by an account
+   * key the relay does not hold, so it can WITHHOLD them but cannot forge one —
+   * and withholding produces "unvouched", never a wrong answer. Asking the
+   * relay for evidence it cannot fabricate is safe; trusting it to interpret
+   * that evidence is not, which is why resolution happens here and not there.
+   */
+  async listVoucherRecords(subjectEntityId: EntityId): Promise<any[]> {
+    const response = await this.request<{ records: any[] }>('/vouchers/list', {
+      entity_id: this.entityId,
+      subject_entity_id: subjectEntityId,
+    });
+    return response.records ?? [];
+  }
+
+  /**
    * Mark messages as delivered.
    */
   async markDelivered(messageIds: number[]): Promise<void> {

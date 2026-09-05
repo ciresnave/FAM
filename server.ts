@@ -191,11 +191,16 @@ Read the from_id, from_summary, and from_cwd attributes to understand who sent t
 
 Available tools:
 - list_peers: Discover other Claude Code instances (scope: machine/directory/repo)
+- whoami: Read YOUR OWN peer record — id, cwd, registered_at, summary
 - send_message: Send a message to another instance by ID
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
 
-When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`,
+When you start, call whoami and then set_summary, and PUT YOUR OWN ID IN YOUR SUMMARY.
+
+Why: list_peers excludes you, so without whoami a summary cannot name its own address. If your session restarts it re-registers under a NEW id while the old registration can keep heartbeating — so peers hold an id that no longer reaches you, and nothing looks wrong from either side. A summary that names its own id makes that twin visible at a glance: the stale row's summary names an id that is not that row's id.
+
+When comparing two rows that might be the same agent, prefer registered_at over last_seen. A superseded registration can still heartbeat, so "recently seen" does not mean "live".`,
   }
 );
 
@@ -217,6 +222,25 @@ const TOOLS = [
         },
       },
       required: ["scope"],
+    },
+  },
+  {
+    name: "whoami",
+    description:
+      "Return THIS instance's own peer record: id, pid, cwd, git repo, summary, " +
+      "registered_at and last_seen. " +
+      "INTENDED USE: put your id into your own summary with set_summary, so your " +
+      "summary is self-identifying. `list_peers` excludes you, so without this a " +
+      "summary cannot name its own address — and if your session restarts and " +
+      "re-registers, the stale registration can keep heartbeating while you are " +
+      "unreachable at the id others hold. A summary that names its own id makes " +
+      "that twin visible at a glance: the stale row's summary names an id that is " +
+      "not that row's id. " +
+      "Prefer registered_at over last_seen when comparing two rows: a superseded " +
+      "registration can still heartbeat, so 'recently seen' does not mean 'live'.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
     },
   },
   {
@@ -358,6 +382,97 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             {
               type: "text" as const,
               text: `Error sending message: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "whoami": {
+      // ⚠️ NO BROKER CHANGE. The broker is a SINGLETON DAEMON every lane on this
+      // machine shares, so altering it needs a daemon restart — far more
+      // disruptive than the per-lane MCP restart this file needs. `/list-peers`
+      // already returns every row when `exclude_id` is omitted (the filter is
+      // guarded by `if (body.exclude_id)`), so the caller's own row is
+      // obtainable with the endpoints that exist.
+      if (!myId) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Not registered with the broker yet, so this instance has no id to report.",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      try {
+        const peers = (await brokerFetch("/list-peers", {
+          scope: "machine",
+          cwd: myCwd,
+          git_root: myGitRoot,
+          // exclude_id deliberately omitted — this is the one call that wants self.
+        })) as Peer[];
+
+        const me = peers.find((p) => p.id === myId);
+
+        if (!me) {
+          // ⚠️ A REAL STATE, NOT AN ERROR. The broker does not have a row for
+          // this id: evicted as a dead process, or unregistered. Reporting it as
+          // a failure would hide the most useful thing it could say — that this
+          // instance is registered in its own memory and nowhere else, which is
+          // exactly the unreachable-but-apparently-fine case.
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text:
+                  `This instance believes its id is ${myId}, but the broker has no row ` +
+                  `for it. Nobody can reach you at that id. Another registration may ` +
+                  `have superseded it, or this one was evicted.`,
+              },
+            ],
+          };
+        }
+
+        const twins = peers.filter((p) => p.id !== myId && p.cwd === me.cwd);
+        const twinNote =
+          twins.length > 0
+            ? `
+
+⚠️ ${twins.length} other registration(s) share this cwd: ` +
+              twins.map((t) => `${t.id} (registered ${t.registered_at})`).join(", ") +
+              `. A superseded registration can still heartbeat, so compare ` +
+              `registered_at rather than last_seen.`
+            : "";
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `id: ${me.id}
+pid: ${me.pid}
+cwd: ${me.cwd}
+` +
+                `git_root: ${me.git_root ?? "(none)"}
+` +
+                `registered_at: ${me.registered_at}
+last_seen: ${me.last_seen}
+` +
+                `summary: ${me.summary || "(none set)"}` +
+                twinNote,
+            },
+          ],
+        };
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error reading own peer record: ${e instanceof Error ? e.message : String(e)}`,
             },
           ],
           isError: true,

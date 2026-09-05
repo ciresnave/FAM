@@ -41,10 +41,19 @@ let recipientEncryptionPublic: string;
 /** The half that is never sent anywhere; used to prove the discovered key works. */
 let recipientEncryptionPrivate: string;
 
-// A literal union rather than `string`, following `sealedSendRoute.test.ts`.
-// The value can then only be a path this file names, which is both true and
-// the reason the scanner stops calling it user-controlled — a helper taking
-// `string` looks identical to one that forwards a caller-supplied URL.
+// A literal union rather than `string`, matching `sealedSendRoute.test.ts`.
+//
+// ⚠️ THIS DOES NOT SATISFY CODACY, AND AN EARLIER VERSION OF THIS COMMENT
+// CLAIMED IT DID. Measured: PR #13 carried the identical annotation on the
+// identical construct at `sealedSendRoute.test.ts:44` and merged with it. The
+// rule flags any variable reaching `fetch`, narrowing or not — so "I followed
+// the existing spelling" was an argument from a false premise, because the
+// existing spelling was never clean either.
+//
+// The union stays because it is a genuine narrowing on its own merits: the
+// value can only be a path this file names. It is not a fix for the scanner,
+// and saying it was would be the same defect as a comment describing a
+// capability that is not there.
 type Endpoint = '/entities/list';
 
 async function post(path: Endpoint, body: unknown): Promise<{ status: number; data: any }> {

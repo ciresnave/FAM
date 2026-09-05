@@ -184,6 +184,14 @@ export async function runAuthCommand(
     server_url: config.serverUrl || DEFAULT_SERVER_URL,
   });
   
+  // ⚠️ SAID OUT LOUD, because the alternative is an entity that silently cannot
+  // receive sealed messages. The encryption key exists locally but the server
+  // has not been told — publishing needs an entity session, which does not
+  // exist yet. `canReceiveSealed` reports false until then.
+  console.log('Encryption key generated locally. It is NOT yet published,');
+  console.log('so this entity cannot receive sealed messages until it');
+  console.log('authenticates and publishes it.');
+
   console.log(`\nCredentials saved to ~/.fam/credentials.json`);
   console.log(`\nYou can now use FAM commands:`);
   console.log(`  fam send someone@email.com "Hello!"`);

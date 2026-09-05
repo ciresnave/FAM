@@ -24,6 +24,7 @@ import { FamClient } from './client';
 import { ChannelPushHandler } from './channel-push';
 import { FAM_TOOLS } from './tools';
 import { decryptPrivateKey } from '../../crypto/encrypt';
+import { readIdentityKey } from '../cli/keyMaterial';
 import { sign, base64ToBuffer } from '../../crypto/keys';
 import type { EncryptedKeyFile } from '../../types';
 import { getActiveEntityCredentials } from '../cli/config';
@@ -86,7 +87,9 @@ async function decryptEntityKey(
   passkey: string
 ): Promise<string> {
   try {
-    return await decryptPrivateKey(encryptedKeyFile, passkey);
+    // Through readIdentityKey: a key file now holds both keys as JSON, and
+    // returning the blob would break every signature this adapter makes.
+    return readIdentityKey(await decryptPrivateKey(encryptedKeyFile, passkey));
   } catch (e) {
     throw new Error(
       `Failed to decrypt private key. Wrong passkey?\n` +

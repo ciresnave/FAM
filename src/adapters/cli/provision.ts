@@ -19,8 +19,7 @@
 
 import { apiRequest } from './client';
 import type { CliConfig } from './config';
-import { generateKeyPair, bufferToBase64 } from '../../crypto/keys';
-import { encryptPrivateKey } from '../../crypto/encrypt';
+import { generateEntityKeys, sealEntityKeys } from './keyMaterial';
 import type { EncryptedKeyFile } from '../../types';
 
 interface CreateEntityResponse {
@@ -30,7 +29,10 @@ interface CreateEntityResponse {
 
 export interface ProvisionedEntity {
   entity_id: string;
+  /** Ed25519 identity key. Already registered with the server. */
   public_key: string;
+  /** X25519 encryption key. NOT yet registered — see the note in the return. */
+  encryption_public_key: string;
   encrypted_key_file: EncryptedKeyFile;
 }
 
@@ -49,26 +51,31 @@ export async function provisionEntity(
   type: string,
   passkey: string
 ): Promise<ProvisionedEntity> {
-  const keys = await generateKeyPair();
-  const publicKey = bufferToBase64(keys.publicKey);
+  // BOTH keypairs, generated here. The identity key signs; the encryption key
+  // is what others seal to. Neither private half is ever transmitted, and the
+  // passkey never leaves this process.
+  const keys = await generateEntityKeys();
 
   const response = await apiRequest<CreateEntityResponse>(config, '/accounts/create-entity', {
     account_token: accountToken,
     name,
     type,
-    public_key: publicKey,
+    public_key: keys.identityPublicKey,
   });
 
-  const encryptedKeyFile = await encryptPrivateKey(
-    bufferToBase64(keys.privateKey),
-    passkey,
-    response.entity_id,
-    publicKey
-  );
+  // Sealed AFTER the round trip, because `encryptPrivateKey` binds the file to
+  // the entity id and the id only exists once the server has replied.
+  const encryptedKeyFile = await sealEntityKeys(keys, passkey, response.entity_id);
 
   return {
     entity_id: response.entity_id,
-    public_key: publicKey,
+    public_key: keys.identityPublicKey,
+    // ⚠️ RETURNED SO THE CALLER CAN PUBLISH IT. The server does not learn this
+    // at creation — `/entities/encryption-key` needs an entity SESSION, which
+    // does not exist until the caller authenticates. Until it is published,
+    // this entity cannot receive sealed messages, and `canReceiveSealed`
+    // reports exactly that rather than anyone guessing.
+    encryption_public_key: keys.encryptionPublicKey,
     encrypted_key_file: encryptedKeyFile,
   };
 }

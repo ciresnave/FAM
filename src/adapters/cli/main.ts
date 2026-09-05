@@ -21,6 +21,7 @@ import { runEntityCommand } from './commands/entity';
 import { runSendCommand } from './commands/message';
 import { runHistoryCommand } from './commands/message';
 import { runChannelCommand } from './commands/channel';
+import { runAccountCommand } from './commands/account';
 import { loadCredentials, type CliConfig } from './config';
 import { DEFAULT_SERVER_URL } from '../../config';
 
@@ -69,6 +70,14 @@ COMMANDS:
                           REFUSED rather than quietly downgraded, and the
                           error names who is missing one.
                           A channel seals to every member, all-or-nothing.
+
+  account                 Manage this account's signing key
+    init-key              Generate the account key that signs vouchers.
+                          Prints the public half and where to publish it;
+                          it does NOT push to your forge.
+    vouch <entity_id>     Sign and publish a voucher binding an entity to
+                          its identity key, so a peer can verify who sent
+                          a message without trusting the relay.
 
   history                 Get message history
     --channel <id>        Channel ID
@@ -191,6 +200,10 @@ async function main() {
         
       case 'channels':
         await runChannelCommand(args.subcommand, args.positional, args.flags, config);
+        break;
+
+      case 'account':
+        await runAccountCommand(args.subcommand, args.positional, args.flags, config);
         break;
         
       default:

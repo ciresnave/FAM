@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { stampVersion, assertFormatSupported } from '../../utils/versioning';
 import { DEFAULT_SERVER_URL } from '../../config';
+import type { EncryptedKeyFile } from '../../types';
 
 // ============================================================================
 // Types
@@ -201,6 +202,42 @@ export async function getActiveEntityId(config: CliConfig): Promise<string> {
 /**
  * Get the account token from credentials.
  */
+/**
+ * Where the account signing key lives. Separate file from `credentials.json`.
+ *
+ * ⚠️ SEPARATE ON PURPOSE. The credential store holds entity key files and a
+ * bearer token — things a client uses constantly. The account key signs
+ * vouchers and is used rarely, and it is the one key whose compromise lets an
+ * attacker vouch for ANY entity in the account. Keeping it out of the file that
+ * every command reads and rewrites reduces how often it is opened, and makes it
+ * obvious what is being backed up.
+ */
+const ACCOUNT_KEY_PATH = join(FAM_DIR, 'account-key.json');
+
+/** The account key file, or null if this holder has never generated one. */
+export async function loadAccountKeyFile(): Promise<EncryptedKeyFile | null> {
+  const file = Bun.file(ACCOUNT_KEY_PATH);
+  if (!(await file.exists())) return null;
+  return (await file.json()) as EncryptedKeyFile;
+}
+
+/**
+ * Write the account key file with owner-only permissions.
+ *
+ * The chmod is best-effort and deliberately not fatal: it is meaningless on
+ * Windows, and a holder on a single-user machine is not worse off than before
+ * if it fails. Failing the whole command over it would refuse to store a key
+ * that is otherwise correctly encrypted.
+ */
+export async function saveAccountKeyFile(keyFile: EncryptedKeyFile): Promise<void> {
+  await Bun.write(ACCOUNT_KEY_PATH, JSON.stringify(keyFile, null, 2));
+  try {
+    await chmod(ACCOUNT_KEY_PATH, 0o600);
+  } catch {
+    // Not fatal; see above.
+  }
+}
+
 export async function getAccountToken(): Promise<string> {
   const credentials = await loadCredentials();
   if (!credentials) {

@@ -9,6 +9,7 @@ import {
 import { readIncoming } from '../../../messaging/receive';
 import { resolveSenderIdentity } from '../../../messaging/senderIdentity';
 import { getPeerAnchorKey } from '../peerAnchors';
+import { loadSeen, REPLAY_WINDOW_MS } from '../seenMessages';
 import type { CliConfig } from '../config';
 import type { Message } from '../../../types';
 import { sendDirect, sendToChannel } from '../sendMessage';
@@ -175,6 +176,8 @@ export async function runHistoryCommand(
   }
 
   const encryptionPrivateKey = await loadEncryptionPrivateKey(config);
+  const historyNow = new Date();
+  const seenAtStart = await loadSeen(historyNow, REPLAY_WINDOW_MS);
   const { entityId: readerEntityId } = await getEntitySession(config);
 
   console.log(`\nMessages (${messages.length}):\n`);
@@ -210,6 +213,10 @@ export async function runHistoryCommand(
         // Required for a CHANNEL message: the group envelope wraps the content
         // key once per member and the reader selects its own by entity id.
         recipientEntityId: readerEntityId,
+        // ⚠️ HISTORY IS READ-ONLY AND DOES NOT RECORD SIGHTINGS. Re-reading
+        // your own history is not a re-delivery, and recording it would make
+        // every message a replay of itself the second time you looked.
+        replay: { seen: seenAtStart, now: historyNow, windowMs: REPLAY_WINDOW_MS },
       }
     );
 
@@ -225,6 +232,11 @@ export async function runHistoryCommand(
             : '  (sealed — opened here, never readable by the server. Sender identity is ' +
               'UNVOUCHED: still the relay’s word. `fam account trust` to change that.)'
         );
+        break;
+      case 'replayed':
+        // Distinct from unreadable: nothing is wrong with the message, it has
+        // simply arrived before.
+        console.log(`  [already delivered] ${read.reason}`);
         break;
       case 'unreadable':
         // ⚠️ THE ENVELOPE IS NEVER PRINTED AS A FALLBACK. Before this, `text`

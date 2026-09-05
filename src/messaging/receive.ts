@@ -28,6 +28,7 @@
 import { open as openSealed } from '../crypto/sealing';
 import { openGroup } from '../crypto/groupSealing';
 import { verifyEnvelope, verifyGroupEnvelope } from '../crypto/envelope';
+import { checkReplay, type SeenMessage, type ReplayOptions } from './replay';
 
 export interface IncomingMessage {
   /**
@@ -57,11 +58,36 @@ export interface ReadKeys {
    * convenience, not an authorisation: the private key is still what opens it.
    */
   recipientEntityId?: string | null;
+  /**
+   * Replay checking inputs. Omitted means no replay checking is performed.
+   *
+   * ⚠️ OPTIONAL BECAUSE A CALLER WITHOUT A STORE IS A REAL CASE, not because it
+   * is negotiable. A caller that supplies nothing gets what it got before; a
+   * caller that supplies a store gets duplicates refused. What must not happen
+   * is a caller silently believing it has replay protection when it passed no
+   * store — so the field is named for what it carries, not for a mode.
+   */
+  replay?: { seen: ReadonlyArray<SeenMessage> } & ReplayOptions;
 }
 
 export type IncomingResult =
   | { kind: 'plaintext'; text: string }
-  | { kind: 'opened'; text: string }
+  /**
+   * Opened. `seen` is what the caller should record so a second delivery of
+   * this message is recognised — returned rather than recorded here, because
+   * writing to a store is the caller's business and this stays decidable.
+   */
+  | { kind: 'opened'; text: string; seen?: SeenMessage }
+  /**
+   * Delivered before.
+   *
+   * ⚠️ ITS OWN KIND, NOT AN `unreadable`. A replay is a message that was
+   * genuinely sent, once, and re-delivered — nothing is wrong with it, and a
+   * caller may reasonably want to count replays or treat them differently from
+   * a message it cannot decrypt. Collapsing the two would make an attack look
+   * like corruption.
+   */
+  | { kind: 'replayed'; reason: string }
   | { kind: 'unreadable'; reason: string };
 
 /**
@@ -124,6 +150,29 @@ export async function readIncoming(
     };
   }
 
+  // ⚠️ THE REPLAY CHECK RUNS AFTER VERIFICATION, AND THE ORDER IS LOAD-BEARING.
+  // The sequence comes out of the envelope. Checking it before the signature is
+  // verified would let anyone poison this client's seen-set with sequences of
+  // their choosing — every future genuine message from that sender bearing a
+  // pre-claimed sequence would be refused as a replay. A denial of service
+  // built out of the replay defence itself.
+  if (keys.replay) {
+    const verdict = checkReplay(
+      keys.replay.seen,
+      {
+        sender: message.from_entity,
+        sequence: Number(envelope?.sequence),
+        sentAt: String(envelope?.sentAt),
+      },
+      { now: keys.replay.now, windowMs: keys.replay.windowMs }
+    );
+
+    if (verdict.kind === 'replay') return { kind: 'replayed', reason: verdict.reason };
+    if (verdict.kind === 'outside-window') {
+      return { kind: 'unreadable', reason: verdict.reason };
+    }
+  }
+
   try {
     const text = isGroup
       ? await openGroup(
@@ -132,7 +181,11 @@ export async function readIncoming(
           envelope.sealed
         )
       : await openSealed(keys.recipientEncryptionPrivateKey, envelope.sealed);
-    return { kind: 'opened', text };
+    return {
+      kind: 'opened',
+      text,
+      seen: { sender: message.from_entity, sequence: Number(envelope?.sequence) },
+    };
   } catch (e) {
     // ⚠️ THE REASON MUST NOT CARRY THE ENVELOPE. The underlying error can
     // include ciphertext and key material, and a reason string is exactly what

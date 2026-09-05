@@ -167,6 +167,20 @@ export interface Message {
   to_entity: EntityId | null;
   text: string;
   sent_at: string;
+  /**
+   * Whether `text` is a sealed envelope rather than a message.
+   *
+   * ⚠️ THIS WAS ALREADY BEING TRANSMITTED AND WAS NOT DECLARED. The server
+   * SELECTs `*`, so the column reached every client at runtime while this type
+   * omitted it — measured against a live server, not inferred. A reader who
+   * trusted the type would conclude no such signal existed, and render the
+   * envelope JSON as the message body.
+   *
+   * SQLite has no boolean, so this arrives as 0/1. It is typed as it actually
+   * arrives rather than coerced at the boundary, because a declared `boolean`
+   * that is really a number is the same kind of lie in the other direction.
+   */
+  sealed?: 0 | 1;
   // NOTE: there is deliberately no `delivered` field.
   //
   // The `messages.delivered` COLUMN still exists — migration v7's backfill
@@ -368,6 +382,16 @@ export interface WebSocketMessagePush {
   channel: ChannelId | null;
   to: EntityId | null;
   text: string;
+  /**
+   * Whether `text` is a sealed envelope rather than a message body.
+   *
+   * ⚠️ THE SERVER ALREADY SENDS THIS AND THE TYPE DID NOT DECLARE IT — the
+   * sealed push sets it and casts the frame to `any` to get past this
+   * interface. So a client reading the type concluded the signal did not
+   * exist, and pushed the envelope JSON into a recipient's context as if it
+   * were what somebody wrote.
+   */
+  sealed?: boolean;
   timestamp: string;
   message_id: number;
 }

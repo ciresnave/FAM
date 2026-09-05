@@ -1,22 +1,25 @@
 // Message Commands - Send and Read Messages
 
-import { entityRequest, getEntitySession, loadIdentityPrivateKey } from '../client';
+import {
+  entityRequest,
+  getEntitySession,
+  loadIdentityPrivateKey,
+  loadEncryptionPrivateKey,
+} from '../client';
+import { readIncoming } from '../../../messaging/receive';
 import type { CliConfig } from '../config';
+import type { Message } from '../../../types';
 import { sendDirect } from '../sendMessage';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-interface Message {
-  id: number;
-  channel_id: string | null;
-  from_entity: string;
-  to_entity: string | null;
-  text: string;
-  sent_at: string;
-  delivered: boolean;
-}
+// ⚠️ THE SHARED TYPE, NOT A LOCAL COPY. This file declared its own `Message`
+// carrying `delivered: boolean` — a field the shared type OMITS on purpose, so
+// the compiler refuses reads of a column nothing has written since schema v7.
+// A local duplicate silently restored what the shared type removed, and it is
+// how `sealed` came to be missing here while the server was sending it.
 
 interface SendMessageResponse {
   message_id: number;
@@ -134,8 +137,22 @@ export async function runHistoryCommand(
     return;
   }
   
+  // ⚠️ OPENING NEEDS TWO KEYS, AND THE SECOND ONE IS THE POINT. The recipient's
+  // private half decrypts; the SENDER's public half is what says who wrote it.
+  // A recipient's encryption key is public by construction, so anyone can seal
+  // to them — decryption alone proves only that a message was addressed here.
+  // The directory is fetched once and indexed, rather than per message.
+  const directory = await entityRequest<{ entities: Array<{ id: string; public_key: string }> }>(
+    config,
+    '/entities/list',
+    {}
+  );
+  const senderKeys = new Map(directory.entities.map((e) => [e.id, e.public_key]));
+
+  const encryptionPrivateKey = await loadEncryptionPrivateKey(config);
+
   console.log(`\nMessages (${messages.length}):\n`);
-  
+
   for (const msg of messages) {
     const time = new Date(msg.sent_at).toLocaleString();
     const from = msg.from_entity;
@@ -147,7 +164,36 @@ export async function runHistoryCommand(
     // `messages.delivered` still exists but is vestigial: nothing writes it,
     // so rendering it would have marked every message "[undelivered]" forever.
     console.log(`[${time}] ${from} → ${to}`);
-    console.log(`  ${msg.text}`);
+
+    const read = await readIncoming(
+      { sealed: msg.sealed, text: msg.text, from_entity: msg.from_entity },
+      {
+        recipientEncryptionPrivateKey: encryptionPrivateKey,
+        // A sender absent from the directory cannot be verified, so nothing is
+        // shown for their message. Passing '' rather than skipping the check
+        // keeps the failure on the authenticity path instead of inventing a
+        // fourth outcome that renders unverified content.
+        senderIdentityPublicKey: senderKeys.get(msg.from_entity) ?? '',
+      }
+    );
+
+    switch (read.kind) {
+      case 'plaintext':
+        console.log(`  ${read.text}`);
+        break;
+      case 'opened':
+        console.log(`  ${read.text}`);
+        console.log('  (sealed — opened here, never readable by the server)');
+        break;
+      case 'unreadable':
+        // ⚠️ THE ENVELOPE IS NEVER PRINTED AS A FALLBACK. Before this, `text`
+        // for a sealed message WAS the envelope JSON, so "show what we have"
+        // put a JSON blob in front of a person as though someone had written
+        // it — with no error anywhere.
+        console.log(`  [not shown] ${read.reason}`);
+        break;
+    }
+
     console.log('');
   }
 }

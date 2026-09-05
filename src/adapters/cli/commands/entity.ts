@@ -103,6 +103,14 @@ async function createEntity(
     config
   );
   
+
+  // ⚠️ SAID OUT LOUD, because the alternative is an entity that silently
+  // cannot receive sealed messages. The encryption key exists locally but the
+  // server has not been told — that needs an entity session, which does not
+  // exist yet. `canReceiveSealed` will report false until it is published.
+  console.log('Encryption key generated locally. It is NOT yet published,');
+  console.log('so this entity cannot receive sealed messages until it');
+  console.log('authenticates and publishes it.');
   console.log(`Credentials saved. You can now use this entity with FAM commands.`);
 }
 

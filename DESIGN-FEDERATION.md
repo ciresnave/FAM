@@ -44,10 +44,45 @@ Closing that needs pinning-on-first-use with change alerts, a transparency log,
 or at minimum a fingerprint the holder publishes out of band. **None is built.
 Recorded so "we use git" is not mistaken for "it is checkable".**
 
-**Built so far** (`src/crypto/voucher.ts`): the voucher and revocation records,
-their signing and verification under an account key the caller must supply, and
-sequence-based resolution. **Not built:** anything that fetches an account key,
-the wire format, storage, or the forge-repo layout.
+**Corrected 2026-09-05 — every item in the old "not built" list has since been
+built, and a stale "NOT BUILT" is the more expensive direction: a false *done*
+stops work that should happen, a false *not built* causes work that should not.**
+
+**Built** — verified at `origin/main`:
+
+- the voucher and revocation records, their signing and verification under a
+  supplied account key, and sequence-based resolution (`src/crypto/voucher.ts`)
+- **fetching an account key** from a forge (`src/federation/accountKey.ts`,
+  `fetchAccountKey`), with the repo layout fixed at `fam/account.pub` and the
+  URL built from a template so a caller cannot supply one
+- **storage**: the `vouchers` table and `account_key_pins`
+- **the wire format**: `POST /vouchers/publish` and `POST /vouchers/list`
+- **pinning with change reporting** (`src/db/repositories/accountKeyPin.ts`):
+  `observe` never silently updates a pin, and `acceptChange` requires the new
+  key to match what was recorded as pending — provenance, not merely shape
+
+⚠️ **NOT BUILT, AND THIS IS NOW THE WHOLE OF THE GAP: NOTHING CALLS ANY OF IT.**
+Measured — `fetchAccountKey`, `signVoucher`, `signRevocation`,
+`resolveVoucherChain` and `observe` each have **zero call sites outside their
+own module and its tests**, and `MessageSendService` consults the chain **zero
+times**. (Control: `prepareSealedDirect` returns one call site, so the query
+does discriminate.)
+
+**So entity identity still rests on the relay's word.** Confidentiality from the
+relay is genuine by construction — FAM never holds an X25519 private half — but
+**the server still serves the public key a recipient verifies against.** The
+voucher chain is exactly what closes that, and it has never run outside a test.
+
+**This is the same shape as message sealing before 2026-09-05:** every
+primitive, route and storage layer present, individually correct, individually
+tested, with a commit log reading as finished — and the capability absent from
+the running system. What is missing is a client that **generates an account
+key, publishes it, mints a voucher**, and a path that **verifies one**.
+
+**Also still not built:** the out-of-band fingerprint (or transparency log) that
+would make a fetched anchor *checkable* rather than merely relay-independent.
+The comments in `voucher.ts` and `accountKeyPin.ts` naming it are prose, not
+code — verified.
 
 ---
 

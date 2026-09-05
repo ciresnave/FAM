@@ -1152,6 +1152,36 @@ string. **Zero shell invocations remain anywhere outside the gates script.**
 > to `sh -c` can. That is the whole difference between the five that stayed and
 > the one that was removed.
 
+### Retention — RULED 2026-09-02: none
+
+**CireSnave: "No retention. That's how it has been and there's no reason I can
+see to change it."** Closes `DESIGN.md` Open Question 4, *"How long to keep
+message history?"* — **open since the document was written**, not since August.
+
+⚠️ **IT WAS NOT HOW IT HAD BEEN, and that correction was worth making before
+implementing.** The default was **30 days**, `.env.example` shipped
+`FAM_MESSAGE_RETENTION_DAYS=30`, and the sweep ran on a timer — so delivered
+messages **had** been deleted after a month. Implementing the ruling as though
+it confirmed the status quo would have left a false belief in place about what
+the system had been doing to real data.
+
+Now `messageRetentionDays()` in `src/config.ts`: unset or 0 keeps everything, a
+positive value is honoured, and **a malformed or negative value keeps everything
+rather than guessing** — deleting on the strength of a typo is the one outcome
+with no undo.
+
+**Why off is right independent of the ruling:** storage is not the pressure (the
+predecessor carried 6,000 messages and 13 MB in a month) and silently deleting
+history a person can still remember is a surprising default. **Nobody should
+have to opt IN to keeping their own data.**
+
+**And the question was already smaller than when he asked it.** His original
+instinct — *"notify the sender that the destination is unreachable and let them
+figure it out"* — is largely built: 6b item 1 made sending report
+`pushed`/`paused`/`offline` with the recipient's declared state, and the
+undelivered-destruction bug is fixed. What was left was only whether DELIVERED
+messages get a lifetime. They do not.
+
 ### Phase 5 — Federation (DESIGNED at `64e2925`; first increment building)
 
 Specified in `DESIGN.md` (Phase 5: Federation) and for a long time never given a

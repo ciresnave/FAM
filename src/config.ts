@@ -41,3 +41,35 @@ export function adminAllowedOrigins(): string[] {
   const host = process.env.FAM_HOST ?? DEFAULT_HOST;
   return [`http://${host}:${port}`, `http://localhost:${port}`];
 }
+
+
+/**
+ * How many days of message history to keep. Zero means keep everything.
+ *
+ * RULED BY CIRESNAVE 2026-09-02: no retention. DESIGN.md's Open Question 4
+ * ("how long to keep message history?") is closed, and it had been open since
+ * the document was written.
+ *
+ * THIS IS A CHANGE, NOT A CONFIRMATION. The default was 30 days and the sweep
+ * ran on a timer, so delivered messages HAVE been deleted after a month. His
+ * reading was that retention had always been off; it had not, and the
+ * difference is worth naming rather than quietly implementing the ruling as
+ * though nothing changed.
+ *
+ * WHY OFF IS RIGHT REGARDLESS: storage is not the pressure — the predecessor
+ * carried 6,000 messages and 13 MB in a month — and silently deleting history a
+ * person can still remember is a surprising default. An operator who wants a
+ * lifetime can set one; nobody has to opt IN to keeping their own data.
+ *
+ * The value is still honoured when set, so this is a default change and not a
+ * removal of the capability.
+ */
+export function messageRetentionDays(): number {
+  const raw = process.env.FAM_MESSAGE_RETENTION_DAYS;
+  if (raw === undefined || raw === '') return 0;
+
+  const days = parseInt(raw, 10);
+  // A malformed value keeps everything rather than guessing a number. Deleting
+  // on the strength of a typo is the one outcome with no undo.
+  return Number.isFinite(days) && days > 0 ? days : 0;
+}

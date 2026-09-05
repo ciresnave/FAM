@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createContext } from '../../db/transaction';
 import { initializeDatabase, migrateTo, CURRENT_SCHEMA_VERSION } from '../../db/schema';
+import type { AnchorFetchedKey } from '../../types/provenance';
 
 // ============================================================================
 // Pinning — the half that makes the anchor CHECKABLE rather than merely
@@ -31,6 +32,19 @@ const KEY_A = Buffer.alloc(32, 1).toString('base64');
 const KEY_B = Buffer.alloc(32, 2).toString('base64');
 const URL_A = 'https://raw.githubusercontent.com/alice/alice/main/fam/account.pub';
 
+/**
+ * Build a fixture that stands in for a real anchor fetch.
+ *
+ * The cast lives HERE and not in src/: `provenance.test.ts` counts construction
+ * sites under src/ only, because the rule is about production code. A test that
+ * could not build a fixture would be testing nothing — but a test fixture is
+ * also exactly where a fake would hide, so this one is named for what it is.
+ */
+function asFetched(publicKey: string, url: string) {
+  return { publicKey, url } as unknown as AnchorFetchedKey;
+}
+
+
 describe('pinning an account key', () => {
   let db: Database;
   let ctx: ReturnType<typeof createContext>;
@@ -54,14 +68,14 @@ describe('pinning an account key', () => {
   });
 
   test('the first sighting is PINNED, and taken on faith', async () => {
-    const result = ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
+    const result = ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
     expect(result.status).toBe('pinned');
     expect(result.status === 'pinned' && result.publicKey).toBe(KEY_A);
   });
 
   test('the same key again is UNCHANGED, not re-pinned', async () => {
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
-    const again = ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
+    const again = ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
 
     expect(again.status).toBe('unchanged');
   });
@@ -71,8 +85,8 @@ describe('pinning an account key', () => {
     // a compromised forge account and a legitimate rotation produce the SAME
     // observation, and the entire value of pinning is that a human is asked
     // which one this is.
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
-    const changed = ctx.accountKeyPins.observe(ACCOUNT, KEY_B, URL_A);
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
+    const changed = ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_B, URL_A));
 
     expect(changed.status).toBe('changed');
     expect(changed.status === 'changed' && changed.pinned).toBe(KEY_A);
@@ -88,9 +102,9 @@ describe('pinning an account key', () => {
     // Not a one-shot alert. If the second look said `unchanged`, a caller that
     // missed the first report would conclude everything was fine — and the
     // caller most likely to miss it is an automated one.
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_B, URL_A);
-    const third = ctx.accountKeyPins.observe(ACCOUNT, KEY_B, URL_A);
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_B, URL_A));
+    const third = ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_B, URL_A));
 
     expect(third.status).toBe('changed');
   });
@@ -100,20 +114,20 @@ describe('pinning an account key', () => {
     // of band. Deliberately a different method: a caller cannot arrive here by
     // passing a flag to `observe`, because a flag is something a retry loop
     // eventually sets.
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_B, URL_A);
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_B, URL_A));
 
-    ctx.accountKeyPins.acceptChange(ACCOUNT, KEY_B, URL_A);
+    ctx.accountKeyPins.acceptChange(ACCOUNT, asFetched(KEY_B, URL_A));
 
     expect(ctx.accountKeyPins.getPinned(ACCOUNT)).toBe(KEY_B);
-    expect(ctx.accountKeyPins.observe(ACCOUNT, KEY_B, URL_A).status).toBe('unchanged');
+    expect(ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_B, URL_A)).status).toBe('unchanged');
   });
 
   test('accepting a key that was never observed is refused', async () => {
     // Otherwise `acceptChange` is just `setPin` with a longer name, and the
     // ceremony that makes it a decision is gone.
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
-    expect(() => ctx.accountKeyPins.acceptChange(ACCOUNT, KEY_B, URL_A)).toThrow(/observed/i);
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
+    expect(() => ctx.accountKeyPins.acceptChange(ACCOUNT, asFetched(KEY_B, URL_A))).toThrow(/observed/i);
   });
 
   test('an unpinned account reports null, not an empty string', () => {
@@ -126,8 +140,8 @@ describe('pinning an account key', () => {
     const other = 'bob@example.com';
     db.prepare('INSERT OR IGNORE INTO accounts (id) VALUES (?)').run(other);
 
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
-    const bobFirst = ctx.accountKeyPins.observe(other, KEY_B, URL_A);
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
+    const bobFirst = ctx.accountKeyPins.observe(other, asFetched(KEY_B, URL_A));
 
     // Bob's different key is a FIRST sighting for Bob, not a change.
     expect(bobFirst.status).toBe('pinned');
@@ -181,12 +195,12 @@ describe('a pin only holds a real key', () => {
     // failure: every subsequent observation of the REAL key reads as `changed`,
     // which is an alert about the wrong thing.
     for (const bad of ['', 'not base64!!!', Buffer.alloc(16, 1).toString('base64')]) {
-      expect(() => ctx.accountKeyPins.observe(ACCOUNT, bad, URL_A)).toThrow();
+      expect(() => ctx.accountKeyPins.observe(ACCOUNT, asFetched(bad, URL_A))).toThrow();
       expect(ctx.accountKeyPins.getPinned(ACCOUNT)).toBeNull();
     }
 
     // Control: a well-formed key IS accepted, so the guard is not "refuse all".
-    expect(ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A).status).toBe('pinned');
+    expect(ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A)).status).toBe('pinned');
   });
 
   test('a base64 string that decodes to 32 bytes but is not canonical is refused', async () => {
@@ -196,14 +210,14 @@ describe('a pin only holds a real key', () => {
     const sneaky = KEY_A.slice(0, 10) + '!!!' + KEY_A.slice(10);
     expect(Buffer.from(sneaky, 'base64').length).toBe(32);
 
-    expect(() => ctx.accountKeyPins.observe(ACCOUNT, sneaky, URL_A)).toThrow(/base64/);
+    expect(() => ctx.accountKeyPins.observe(ACCOUNT, asFetched(sneaky, URL_A))).toThrow(/base64/);
   });
 
   test('accepting a malformed key is refused too', async () => {
     // The other entry point. Guarding only `observe` would leave the pin
     // reachable through the method that exists to change it.
-    ctx.accountKeyPins.observe(ACCOUNT, KEY_A, URL_A);
-    expect(() => ctx.accountKeyPins.acceptChange(ACCOUNT, 'garbage', URL_A)).toThrow();
+    ctx.accountKeyPins.observe(ACCOUNT, asFetched(KEY_A, URL_A));
+    expect(() => ctx.accountKeyPins.acceptChange(ACCOUNT, asFetched('garbage', URL_A))).toThrow();
     expect(ctx.accountKeyPins.getPinned(ACCOUNT)).toBe(KEY_A);
   });
 });

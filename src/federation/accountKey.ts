@@ -28,6 +28,7 @@
 
 import { ValidationError } from '../types/errors';
 import { assertRaw32ByteKey } from '../types/validation';
+import type { AnchorFetchedKey } from '../types/provenance';
 
 export type Forge = 'github';
 
@@ -48,11 +49,16 @@ export type Fetcher = (
   url: string
 ) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
 
-export interface FetchedAccountKey {
-  publicKey: string;
-  /** Recorded so a caller can show WHERE a key came from, not just what it is. */
-  url: string;
-}
+/**
+ * What a successful anchor fetch returns.
+ *
+ * ⚠️ BRANDED. The pin accepts only this type, so a key from any other
+ * source cannot be pinned by ordinary code — supplying one requires an explicit
+ * cast, and  FAILS if a second cast
+ * appears anywhere in src/. The brand shifts the default; the test is the
+ * constraint.
+ */
+export type FetchedAccountKey = AnchorFetchedKey;
 
 /**
  * Per-forge templates. Host is a constant; the username is the only variable.
@@ -132,5 +138,8 @@ export async function fetchAccountKey(
     why: 'A key file should contain only the key.',
   });
 
-  return { publicKey: body, url };
+  // ⚠️ THE ONLY SANCTIONED CONSTRUCTION SITE. A second  anywhere under src/ fails provenance.test.ts by count.
+  // The cast is safe HERE and only here, because this is the one place that has
+  // actually read the bytes from the holder's repository.
+  return { publicKey: body, url } as AnchorFetchedKey;
 }

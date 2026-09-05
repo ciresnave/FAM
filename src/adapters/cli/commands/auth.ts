@@ -3,6 +3,7 @@
 // Opens browser for OAuth, handles callback, saves credentials.
 
 import { provisionEntity } from '../provision';
+import { publishEncryptionKey } from '../encryptionKey';
 import { createServer } from 'http';
 import { URL } from 'url';
 import { apiRequest } from '../client';
@@ -184,13 +185,27 @@ export async function runAuthCommand(
     server_url: config.serverUrl || DEFAULT_SERVER_URL,
   });
   
-  // ⚠️ SAID OUT LOUD, because the alternative is an entity that silently cannot
-  // receive sealed messages. The encryption key exists locally but the server
-  // has not been told — publishing needs an entity session, which does not
-  // exist yet. `canReceiveSealed` reports false until then.
-  console.log('Encryption key generated locally. It is NOT yet published,');
-  console.log('so this entity cannot receive sealed messages until it');
-  console.log('authenticates and publishes it.');
+  // ⚠️ PUBLISH IMMEDIATELY. Until this lands, `canReceiveSealed` is false
+  // and nobody can send this entity a sealed message. Leaving it for a later
+  // command would mean every entity spends an unbounded window silently unable
+  // to receive sealed mail, and nothing would report that as a problem.
+  //
+  // A failure here is NOT fatal to creation: the entity exists, its identity
+  // key works, and the key file holds the encryption key. So it is reported
+  // with the remedy rather than thrown, and the credentials are already saved.
+  try {
+    await publishEncryptionKey(config, {
+      entityId: entityData.entity_id,
+      keyFile: entityData.encrypted_key_file,
+      passkey,
+    });
+    console.log('Encryption key published. This entity can receive sealed messages.');
+  } catch (e) {
+    console.log('Encryption key generated and saved locally, but PUBLISHING FAILED:');
+    console.log(`  ${e instanceof Error ? e.message : String(e)}`);
+    console.log('This entity cannot receive sealed messages until it is published.');
+  }
+
 
   console.log(`\nCredentials saved to ~/.fam/credentials.json`);
   console.log(`\nYou can now use FAM commands:`);

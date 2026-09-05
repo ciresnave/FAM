@@ -2,6 +2,7 @@
 
 import { apiRequest, entityRequest } from '../client';
 import { provisionEntity } from '../provision';
+import { publishEncryptionKey } from '../encryptionKey';
 import {
   addEntityCredentials,
   switchEntity,
@@ -105,13 +106,27 @@ async function createEntity(
   );
   
 
-  // ⚠️ SAID OUT LOUD, because the alternative is an entity that silently
-  // cannot receive sealed messages. The encryption key exists locally but the
-  // server has not been told — that needs an entity session, which does not
-  // exist yet. `canReceiveSealed` will report false until it is published.
-  console.log('Encryption key generated locally. It is NOT yet published,');
-  console.log('so this entity cannot receive sealed messages until it');
-  console.log('authenticates and publishes it.');
+  // ⚠️ PUBLISH IMMEDIATELY. Until this lands, `canReceiveSealed` is false
+  // and nobody can send this entity a sealed message. Leaving it for a later
+  // command would mean every entity spends an unbounded window silently unable
+  // to receive sealed mail, and nothing would report that as a problem.
+  //
+  // A failure here is NOT fatal to creation: the entity exists, its identity
+  // key works, and the key file holds the encryption key. So it is reported
+  // with the remedy rather than thrown, and the credentials are already saved.
+  try {
+    await publishEncryptionKey(config, {
+      entityId: response.entity_id,
+      keyFile: response.encrypted_key_file,
+      passkey,
+    });
+    console.log('Encryption key published. This entity can receive sealed messages.');
+  } catch (e) {
+    console.log('Encryption key generated and saved locally, but PUBLISHING FAILED:');
+    console.log(`  ${e instanceof Error ? e.message : String(e)}`);
+    console.log('This entity cannot receive sealed messages until it is published.');
+  }
+
   console.log(`Credentials saved. You can now use this entity with FAM commands.`);
 }
 

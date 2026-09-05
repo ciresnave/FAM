@@ -519,6 +519,28 @@ export class FamClient {
   }
   
   /**
+   * Send a sealed direct message.
+   *
+   * ⚠️ TAKES NO `refs`, AND THAT IS NOT AN OVERSIGHT. `/messages/send-sealed`
+   * accepts none: refs are stored server-side in `message_refs`, which is both
+   * a place the server can read them and a place this envelope cannot reach.
+   * Accepting them here and dropping them would be silent data loss, and
+   * attaching them alongside would publish to the relay exactly the metadata —
+   * a sha, a command, a measured value — that sealing exists to withhold.
+   * The caller refuses instead; see the send handler.
+   */
+  async sendSealedDirectMessage(
+    toEntity: EntityId,
+    envelope: unknown
+  ): Promise<SendMessageResponse> {
+    return this.request<SendMessageResponse>('/messages/send-sealed', {
+      entity_id: this.entityId,
+      to_entity: toEntity,
+      envelope,
+    });
+  }
+
+  /**
    * Send a channel message.
    */
   async sendChannelMessage(channelId: ChannelId, text: string): Promise<SendMessageResponse> {

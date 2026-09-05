@@ -42,7 +42,15 @@ export const FAM_TOOLS = [
           type: 'string' as const,
           description: 'The message text to send',
         },
-      },
+        allow_plaintext: {
+          type: 'boolean' as const,
+          description:
+            'Optional, default false. A direct message is SEALED by default: the server ' +
+            'cannot read it. If the recipient has never published an encryption key the ' +
+            'send is REFUSED rather than quietly downgraded; set this to true to send it ' +
+            'unsealed anyway. The result always says which of the two happened. Channel ' +
+            'messages are not sealed yet regardless of this flag.',
+        },
         measure: {
           type: 'object' as const,
           description:
@@ -80,6 +88,7 @@ export const FAM_TOOLS = [
             sha: { type: 'string' as const },
           },
         },
+      },
       required: ['text'],
     },
   },

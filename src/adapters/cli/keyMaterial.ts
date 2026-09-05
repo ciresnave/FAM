@@ -164,3 +164,32 @@ export function parseStoredPrivateKeys(decrypted: string): {
     throw e;
   }
 }
+
+/**
+ * The identity private key, from a key file of either format.
+ *
+ * ⚠️ EVERY CONSUMER MUST GO THROUGH THIS. `client.ts`, the CLI availability
+ * command and the MCP adapter all used the decrypted blob DIRECTLY as a signing
+ * key — correct while the blob was a bare base64 key, and broken the moment a
+ * key file carried both keys as JSON. Authentication would have failed for
+ * every newly created entity, and the error would have surfaced as a key-import
+ * failure a long way from the cause.
+ *
+ * A format is a contract between a writer and its readers. Testing only the
+ * writer tests only half of it.
+ */
+export function readIdentityKey(decrypted: string): string {
+  return parseStoredPrivateKeys(decrypted).identity;
+}
+
+/**
+ * The encryption private key, or null for a key file written before it existed.
+ *
+ * `null` is a real answer — that entity has no encryption key and cannot open
+ * sealed mail until one is generated. Distinguishing it from an error is what
+ * lets a caller offer to fix it rather than reporting a valid old file as
+ * corrupt.
+ */
+export function readEncryptionKey(decrypted: string): string | null {
+  return parseStoredPrivateKeys(decrypted).encryption;
+}

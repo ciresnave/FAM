@@ -3,6 +3,7 @@
 import type { CliConfig } from './config';
 import { getServerUrl, getAccountToken, getActiveEntityCredentials } from './config';
 import { decryptPrivateKey } from '../../crypto/encrypt';
+import { readIdentityKey } from './keyMaterial';
 import { sign, base64ToBuffer } from '../../crypto/keys';
 import type { EncryptedKeyFile } from '../../types';
 
@@ -89,7 +90,10 @@ export async function getEntitySession(
   }
 
   const keyFile: EncryptedKeyFile = JSON.parse(credentials.encrypted_key_file);
-  const privateKeyBase64 = await decryptPrivateKey(keyFile, passkey);
+  // Through readIdentityKey, never the raw blob: a key file now carries BOTH
+  // keys as JSON, and feeding that to a signer fails at key import with an
+  // error that points nowhere near the cause.
+  const privateKeyBase64 = readIdentityKey(await decryptPrivateKey(keyFile, passkey));
 
   const { nonce } = await apiRequest<{ nonce: string }>(config, '/entities/connect', {
     entity_id: credentials.entity_id,

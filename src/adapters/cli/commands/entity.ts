@@ -11,6 +11,7 @@ import {
   type CliConfig,
 } from '../config';
 import { decryptPrivateKey } from '../../../crypto/encrypt';
+import { readIdentityKey } from '../keyMaterial';
 import { sign, base64ToBuffer } from '../../../crypto/keys';
 import type { EncryptedKeyFile } from '../../../types';
 
@@ -168,7 +169,9 @@ async function setAvailabilityCommand(
   
   console.error('Authenticating...'); // stderr keeps stdout clean
   
-  const privateKeyBase64 = await decryptPrivateKey(keyFile, passkey);
+  // See client.ts: the decrypted blob is JSON for any entity created since
+  // both keypairs started travelling together.
+  const privateKeyBase64 = readIdentityKey(await decryptPrivateKey(keyFile, passkey));
   
   const { nonce } = await apiRequest<{ nonce: string }>(config, '/entities/connect', {
     entity_id: credentials.entity_id,

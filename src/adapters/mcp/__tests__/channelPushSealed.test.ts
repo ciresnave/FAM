@@ -85,6 +85,24 @@ async function sealedPush(signer: Uint8Array, text: string) {
 
 const aliceDirectory = () => [{ id: ALICE, public_key: bufferToBase64(alice.publicKey) }];
 
+/**
+ * Every string anywhere in a value.
+ *
+ * Used instead of `JSON.stringify(...).not.toContain(...)`, which says
+ * "serialise this and search the text" when the actual claim is "no string
+ * ANYWHERE in what was pushed is, or contains, the forged body". The direct
+ * form does not depend on serialisation at all — key ordering, key names and
+ * escaping are all irrelevant to the property being asserted.
+ */
+function allStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) for (const v of value) allStrings(v, out);
+  else if (value && typeof value === 'object') {
+    for (const v of Object.values(value)) allStrings(v, out);
+  }
+  return out;
+}
+
 /** Reach the private handler the client would have invoked. */
 function deliver(handler: ChannelPushHandler, push: unknown): Promise<void> {
   return (handler as any).handleMessage(push);
@@ -138,7 +156,9 @@ describe('⚠️ a forged sealed push', () => {
 
     expect(mcp.pushed).toHaveLength(1);
     expect(mcp.pushed[0]!.content).toContain('[not shown]');
-    expect(JSON.stringify(mcp.pushed[0])).not.toContain('FORGED-SENTINEL-11c2');
+    expect(
+      allStrings(mcp.pushed[0]).filter((v) => v.includes('FORGED-SENTINEL-11c2'))
+    ).toEqual([]);
   });
 });
 

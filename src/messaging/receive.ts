@@ -83,53 +83,16 @@ export async function readIncoming(
     };
   }
 
-  let envelope: any;
-  try {
-    envelope = JSON.parse(message.text);
-  } catch {
-    // A row marked sealed whose text is not an envelope is a real state — a
-    // truncated write, an older format. Reported, not thrown: an exception here
-    // would take down an entire history render because of one bad row.
-    return {
-      kind: 'unreadable',
-      reason: 'This message is marked sealed but its envelope could not be parsed.',
-    };
-  }
+  const parsed = parseEnvelope(message.text);
+  if ('reason' in parsed) return { kind: 'unreadable', reason: parsed.reason };
+  const envelope = parsed.envelope;
 
   // ⚠️ THE ENVELOPE'S OWN CLAIM ABOUT ITS SENDER IS CHECKED AGAINST THE ROW'S.
   // The signature covers `sender`, so a valid signature over a DIFFERENT sender
   // is a correctly signed message from someone else. If the two disagree, one
   // of them is wrong and the recipient must not pick silently.
-  if (envelope?.sender !== message.from_entity) {
-    return {
-      kind: 'unreadable',
-      reason:
-        `This message says it is from ${String(envelope?.sender)} but was delivered as from ` +
-        `${message.from_entity}. Those disagree, so it is not shown.`,
-    };
-  }
-
-  let verified = false;
-  try {
-    verified = await verifyEnvelope(keys.senderIdentityPublicKey, envelope);
-  } catch {
-    verified = false;
-  }
-
-  if (!verified) {
-    // ⚠️ WITHHELD, AND THE TEXT IS NEVER DECRYPTED INTO THIS RESULT. Anyone can
-    // seal to a published key, so this message may well open cleanly — opening
-    // it and returning the content behind a flag would put an unknown party's
-    // words within reach of any renderer that prints what it is handed.
-    return {
-      kind: 'unreadable',
-      reason:
-        `This message claims to be from ${message.from_entity} but its signature does not ` +
-        'verify against that sender key. It is not shown: anyone can seal a message to a ' +
-        'published encryption key, so decrypting it would prove only that it was addressed ' +
-        'here, never who wrote it.',
-    };
-  }
+  const notFromSender = await checkSender(envelope, message, keys);
+  if (notFromSender) return { kind: 'unreadable', reason: notFromSender };
 
   try {
     const text = await openSealed(keys.recipientEncryptionPrivateKey, envelope.sealed);
@@ -145,4 +108,64 @@ export async function readIncoming(
         'That usually means it was sealed to a key that has since been rotated.',
     };
   }
+}
+
+/**
+ * The envelope, or the reason it is not one.
+ *
+ * ⚠️ RETURNS RATHER THAN THROWS. A row marked sealed whose text is not an
+ * envelope is a real state — a truncated write, an older format — and an
+ * exception here would take down an entire history render because of one bad
+ * row. Split out so `readIncoming` reads as one decision per step; the failure
+ * it reports is the same one it always did.
+ */
+function parseEnvelope(text: string): { envelope: any } | { reason: string } {
+  try {
+    return { envelope: JSON.parse(text) };
+  } catch {
+    return { reason: 'This message is marked sealed but its envelope could not be parsed.' };
+  }
+}
+
+/**
+ * Is this really from the sender it names? Returns a reason if not, else null.
+ *
+ * ⚠️ BOTH CHECKS LIVE HERE BECAUSE THEY ANSWER ONE QUESTION, and separating
+ * them at the call site invites doing one and not the other. The envelope's own
+ * `sender` is compared against the row's, because the signature covers `sender`
+ * — a valid signature over a DIFFERENT sender is a correctly signed message
+ * from someone else, and when the two disagree the recipient must not pick.
+ *
+ * ⚠️ NOTHING IS DECRYPTED ON THE FAILURE PATH. Anyone can seal to a published
+ * key, so a forged message may well open cleanly; opening it and returning the
+ * content behind a flag would put an unknown party's words within reach of any
+ * renderer that prints what it is handed.
+ */
+async function checkSender(
+  envelope: any,
+  message: IncomingMessage,
+  keys: ReadKeys
+): Promise<string | null> {
+  if (envelope?.sender !== message.from_entity) {
+    return (
+      `This message says it is from ${String(envelope?.sender)} but was delivered as from ` +
+      `${message.from_entity}. Those disagree, so it is not shown.`
+    );
+  }
+
+  let verified = false;
+  try {
+    verified = await verifyEnvelope(keys.senderIdentityPublicKey, envelope);
+  } catch {
+    verified = false;
+  }
+
+  if (verified) return null;
+
+  return (
+    `This message claims to be from ${message.from_entity} but its signature does not ` +
+    'verify against that sender key. It is not shown: anyone can seal a message to a ' +
+    'published encryption key, so decrypting it would prove only that it was addressed ' +
+    'here, never who wrote it.'
+  );
 }

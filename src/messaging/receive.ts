@@ -26,7 +26,8 @@
 // permit is another party's words appearing under a trusted name.
 
 import { open as openSealed } from '../crypto/sealing';
-import { verifyEnvelope } from '../crypto/envelope';
+import { openGroup } from '../crypto/groupSealing';
+import { verifyEnvelope, verifyGroupEnvelope } from '../crypto/envelope';
 
 export interface IncomingMessage {
   /**
@@ -48,6 +49,14 @@ export interface ReadKeys {
   recipientEncryptionPrivateKey: string | null;
   /** The claimed sender's Ed25519 public key, from the directory. */
   senderIdentityPublicKey: string;
+  /**
+   * This entity's own id — required to open a CHANNEL message.
+   *
+   * A group envelope wraps the content key once per member, and the reader
+   * selects its own wrapped key by entity id. Being listed is a routing
+   * convenience, not an authorisation: the private key is still what opens it.
+   */
+  recipientEntityId?: string | null;
 }
 
 export type IncomingResult =
@@ -87,15 +96,42 @@ export async function readIncoming(
   if ('reason' in parsed) return { kind: 'unreadable', reason: parsed.reason };
   const envelope = parsed.envelope;
 
+  // ⚠️ WHICH ENVELOPE IS THIS? A group envelope carries `channel` where a flat
+  // one carries `recipient`, and its signature covers a DIFFERENT canonical
+  // form. Running a group envelope through the flat path fails verification and
+  // reports the SENDER as unverifiable — so a channel message would be sealed,
+  // delivered and unreadable, with the recipient told the wrong thing about
+  // why. The two are distinguished by shape, not by guessing from the row.
+  const isGroup = typeof envelope?.channel === 'string' && envelope.channel !== '';
+
   // ⚠️ THE ENVELOPE'S OWN CLAIM ABOUT ITS SENDER IS CHECKED AGAINST THE ROW'S.
   // The signature covers `sender`, so a valid signature over a DIFFERENT sender
   // is a correctly signed message from someone else. If the two disagree, one
   // of them is wrong and the recipient must not pick silently.
-  const notFromSender = await checkSender(envelope, message, keys);
+  const notFromSender = await checkSender(envelope, message, keys, isGroup);
   if (notFromSender) return { kind: 'unreadable', reason: notFromSender };
 
+  if (isGroup && !keys.recipientEntityId) {
+    // Without an id there is no way to select a wrapped key, and trying them
+    // all would be both wasteful and a way to open a message addressed to
+    // somebody else who happens to share this key. Reported rather than
+    // guessed at.
+    return {
+      kind: 'unreadable',
+      reason:
+        'This is a sealed channel message and no recipient id was supplied, so the right ' +
+        'wrapped key cannot be selected.',
+    };
+  }
+
   try {
-    const text = await openSealed(keys.recipientEncryptionPrivateKey, envelope.sealed);
+    const text = isGroup
+      ? await openGroup(
+          keys.recipientEntityId as string,
+          keys.recipientEncryptionPrivateKey,
+          envelope.sealed
+        )
+      : await openSealed(keys.recipientEncryptionPrivateKey, envelope.sealed);
     return { kind: 'opened', text };
   } catch (e) {
     // ⚠️ THE REASON MUST NOT CARRY THE ENVELOPE. The underlying error can
@@ -103,9 +139,11 @@ export async function readIncoming(
     // gets printed to a person or into a log.
     return {
       kind: 'unreadable',
-      reason:
-        'This message is sealed to a key this entity does not hold, so it cannot be opened. ' +
-        'That usually means it was sealed to a key that has since been rotated.',
+      reason: isGroup
+        ? 'This channel message could not be opened: either it was not sealed to this entity, ' +
+          'or it was sealed to a key that has since been rotated.'
+        : 'This message is sealed to a key this entity does not hold, so it cannot be opened. ' +
+          'That usually means it was sealed to a key that has since been rotated.',
     };
   }
 }
@@ -144,7 +182,8 @@ function parseEnvelope(text: string): { envelope: any } | { reason: string } {
 async function checkSender(
   envelope: any,
   message: IncomingMessage,
-  keys: ReadKeys
+  keys: ReadKeys,
+  isGroup: boolean
 ): Promise<string | null> {
   if (envelope?.sender !== message.from_entity) {
     return (
@@ -153,9 +192,16 @@ async function checkSender(
     );
   }
 
+  // ⚠️ THE VERIFIER MUST MATCH THE ENVELOPE. A group envelope's signature covers
+  // a different canonical form — including the RECIPIENT LIST — so checking one
+  // with the other's verifier fails and reports the SENDER as unverifiable. The
+  // recipient would then be told a third party is suspect when the real answer
+  // is that this client read the wrong format.
   let verified = false;
   try {
-    verified = await verifyEnvelope(keys.senderIdentityPublicKey, envelope);
+    verified = isGroup
+      ? await verifyGroupEnvelope(keys.senderIdentityPublicKey, envelope)
+      : await verifyEnvelope(keys.senderIdentityPublicKey, envelope);
   } catch {
     verified = false;
   }

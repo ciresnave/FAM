@@ -9,7 +9,7 @@ import {
 import { readIncoming } from '../../../messaging/receive';
 import type { CliConfig } from '../config';
 import type { Message } from '../../../types';
-import { sendDirect } from '../sendMessage';
+import { sendDirect, sendToChannel } from '../sendMessage';
 
 // ============================================================================
 // Types
@@ -61,26 +61,32 @@ export async function runSendCommand(
     toEntity = target;
   }
   
-  // ⚠️ A DIRECT MESSAGE SEALS. A CHANNEL MESSAGE STILL DOES NOT, AND SAYS SO.
-  //
-  // Sealing to a channel needs a group envelope — one content key wrapped per
-  // member — and the member keys have to be gathered first. That is built
-  // (`src/crypto/groupSealing.ts`) but not wired, and wiring it is its own
-  // change. What must NOT happen meanwhile is a channel send that looks
-  // identical to a sealed one, because "it sent fine" is how an unsealed path
-  // stays unnoticed. So it is named at the moment it happens.
-  if (channelId) {
-    const response = await entityRequest<SendMessageResponse>(config, '/messages/send', {
-      channel_id: channelId,
-      text,
-    });
-    console.log(`Message sent to channel ${channelId} (ID: ${response.message_id})`);
-    console.log('NOT SEALED: channel messages are not end-to-end encrypted yet.');
-    return;
-  }
-
+  // ⚠️ BOTH FORMS SEAL NOW, AND A CHANNEL IS ALL-OR-NOTHING. One content key
+  // encrypts the body once and is wrapped per member; the server requires the
+  // recipient set to equal the membership, because sealing to the members who
+  // happen to have keys leaves the rest holding a message they can never open
+  // while the sender sees success.
   const { entityId, sessionId } = await getEntitySession(config);
   const senderIdentityPrivateKey = await loadIdentityPrivateKey(config);
+
+  if (channelId) {
+    const outcome = await sendToChannel(config, {
+      senderId: entityId,
+      senderIdentityPrivateKey,
+      sessionId,
+      channelId,
+      text,
+      allowPlaintext: flags?.plaintext === true,
+    });
+
+    console.log(`Message sent to channel ${channelId} (ID: ${outcome.messageId})`);
+    if (outcome.sealed) {
+      console.log('Sealed to every member: the server cannot read this message.');
+    } else {
+      console.log(`NOT SEALED: ${outcome.downgradeReason}`);
+    }
+    return;
+  }
 
   const outcome = await sendDirect(config, {
     senderId: entityId,
@@ -150,6 +156,7 @@ export async function runHistoryCommand(
   const senderKeys = new Map(directory.entities.map((e) => [e.id, e.public_key]));
 
   const encryptionPrivateKey = await loadEncryptionPrivateKey(config);
+  const { entityId: readerEntityId } = await getEntitySession(config);
 
   console.log(`\nMessages (${messages.length}):\n`);
 
@@ -174,6 +181,9 @@ export async function runHistoryCommand(
         // keeps the failure on the authenticity path instead of inventing a
         // fourth outcome that renders unverified content.
         senderIdentityPublicKey: senderKeys.get(msg.from_entity) ?? '',
+        // Required for a CHANNEL message: the group envelope wraps the content
+        // key once per member and the reader selects its own by entity id.
+        recipientEntityId: readerEntityId,
       }
     );
 

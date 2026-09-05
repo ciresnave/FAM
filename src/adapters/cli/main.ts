@@ -61,13 +61,14 @@ COMMANDS:
     availability <available|unavailable>
                           Pause or resume incoming messages
 
-  send <target> <message> Send a message. Direct messages are SEALED by
-                          default: the server cannot read them.
+  send <target> <message> Send a message. SEALED by default: the server
+                          cannot read it.
     target:               Entity ID (user@email.com) or channel:name
-    --plaintext           Send unsealed if the recipient has published no
-                          encryption key. Without this, such a send is
-                          REFUSED rather than quietly downgraded.
-                          Channel messages are not sealed yet either way.
+    --plaintext           Send unsealed if an intended reader has published
+                          no encryption key. Without this, such a send is
+                          REFUSED rather than quietly downgraded, and the
+                          error names who is missing one.
+                          A channel seals to every member, all-or-nothing.
 
   history                 Get message history
     --channel <id>        Channel ID

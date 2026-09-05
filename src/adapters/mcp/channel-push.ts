@@ -24,17 +24,21 @@ export class ChannelPushHandler {
    * that specifically rather than being shown a damaged-message error.
    */
   private encryptionPrivateKey: string | null;
+  /** This entity's own id, needed to select its wrapped key in a group envelope. */
+  private entityId: string | null;
 
   constructor(
     mcp: Server,
     client: FamClient,
     entityDisplayName: string,
-    encryptionPrivateKey: string | null = null
+    encryptionPrivateKey: string | null = null,
+    entityId: string | null = null
   ) {
     this.mcp = mcp;
     this.client = client;
     this.entityDisplayName = entityDisplayName;
     this.encryptionPrivateKey = encryptionPrivateKey;
+    this.entityId = entityId;
   }
 
   /**
@@ -100,6 +104,9 @@ export class ChannelPushHandler {
         {
           recipientEncryptionPrivateKey: this.encryptionPrivateKey,
           senderIdentityPublicKey: message.sealed ? await this.senderKeyFor(message.from) : '',
+          // Required for a CHANNEL message: the group envelope wraps the
+          // content key once per member, selected by entity id.
+          recipientEntityId: this.entityId,
         }
       );
 

@@ -45,11 +45,12 @@ export const FAM_TOOLS = [
         allow_plaintext: {
           type: 'boolean' as const,
           description:
-            'Optional, default false. A direct message is SEALED by default: the server ' +
-            'cannot read it. If the recipient has never published an encryption key the ' +
-            'send is REFUSED rather than quietly downgraded; set this to true to send it ' +
-            'unsealed anyway. The result always says which of the two happened. Channel ' +
-            'messages are not sealed yet regardless of this flag.',
+            'Optional, default false. Messages are SEALED by default — the server cannot ' +
+            'read them. A direct message seals to the recipient; a channel message seals ' +
+            'to every member, all-or-nothing. If any intended reader has never published ' +
+            'an encryption key the send is REFUSED rather than quietly downgraded, and the ' +
+            'error names who. Set this to true to send unsealed anyway. The result always ' +
+            'says which of the two happened.',
         },
         measure: {
           type: 'object' as const,

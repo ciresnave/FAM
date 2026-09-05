@@ -1224,42 +1224,69 @@ ECDH (libsodium's `crypto_box_seal` shape) in `src/crypto/sealing.ts`.
   offers. So the KDF seam is tested directly by holding one input fixed and
   varying the other, and both mutants now die to the test written for them.
 
+#### 5.2 Sealing end to end — CLOSED 2026-09-05
+
+**The whole arc from "the code can seal" to "a message travels sealed and the
+recipient reads it" landed in five increments.** Each is listed with what it
+actually changed, because the failure this section was previously an example of
+is precisely a roadmap that reads as finished ahead of the deployment.
+
+- **`canReceiveSealed` returned FALSE FOR EVERY ENTITY IN EXISTENCE** until
+  clients published a key. Every primitive, route, storage layer and send path
+  was built and merged across eight PRs, and the running system had never
+  sealed a message. **The commit log read as finished and FAM sent plaintext.**
+  Closed by publishing on entity creation (#25).
+- **CLI direct messages seal** (#26), **MCP direct messages seal** (#27), and
+  the policy is shared — `src/messaging/directSend.ts` takes a transport so the
+  two adapters cannot answer "may this be sealed?" differently. ⚠️ **The MCP
+  default is the CLI default deliberately: two policies with different defaults
+  is one policy — the permissive one — with extra steps, and the laxer one wins
+  wherever agents send.**
+- **Opening on receive** (#28), including the half that is easy to miss: a
+  recipient's encryption key is **public by construction**, so anyone can seal
+  to them. Decryption proves the message was addressed here and **nothing about
+  who wrote it.** A signature mismatch **withholds** the content rather than
+  labelling it, and the forged text is never decrypted into the result at all.
+- **Channel messages seal to every member, all-or-nothing.** One content key,
+  wrapped per member. A partial envelope would leave the unkeyed members
+  holding a message they can never open while the sender sees success, so a
+  keyless member refuses the send **and is named** — the sender cannot fix it,
+  and the people who can are unnamed otherwise.
+
+**Entity identity keys are now generated CLIENT-SIDE.** This section previously
+recorded the opposite as an open finding: `POST /accounts/create-entity` minted
+the Ed25519 pair server-side, so a server compromised at creation time could
+forge that entity's signatures indefinitely. `src/server/routes/accounts.ts`
+now carries no key-generation imports at all — **the imports were removed, not
+just the calls**, so the guarantee is structural rather than a comment asking
+people not to.
+
+⚠️ **`sequence` is documented on the envelope as where replay protection lives,
+and NOTHING ENFORCES MONOTONICITY.** Clients set it from the wall clock and say
+so in the code. **A field documented as a security control that is not one is
+worse than an absent field: an absence prompts a design, a present-but-inert
+field terminates it.** Whoever implements replay checking should replace the
+wall-clock value rather than assume it already is that.
+
 #### Remaining in Phase 5
 
-- ⚠️ **NO CLIENT SEALS YET, so nothing in FAM is end-to-end encrypted in
-  practice.** Every primitive, route and send path exists; `src/adapters/mcp/`
-  and `src/adapters/cli/` both still send plaintext, and neither generates an
-  X25519 pair. **This is first on the list deliberately** — the arc reads as
-  finished from the commit log and is not, and a roadmap that lets it read that
-  way is the stale-claim defect this file has already been corrected for twice.
+- **Federation itself.** Nothing below is about local sealing any more; that is
+  closed above.
 
-- ⚠️ **ENTITY IDENTITY KEYS ARE GENERATED SERVER-SIDE, which makes envelope
-  signing conditional in a way the design text did not say.** Measured
-  2026-09-02 at `4a4de70`: `POST /accounts/create-entity` mints the Ed25519
-  pair (`src/server/routes/accounts.ts:215`) and returns the private half
-  encrypted under the passkey. It is **not stored** — `grep private_key
-  src/db/` returns nothing — **but the server held it.**
-  - **The asymmetry is the finding.** `POST /entities/encryption-key` accepts a
-    PUBLIC key only, so FAM never holds an X25519 private half and
-    confidentiality from the relay is genuine BY CONSTRUCTION. Identity has no
-    such guarantee: a server compromised at creation time keeps the key and
-    forges that entity's signatures indefinitely.
-  - **Fix: entity creation must accept a client-generated public key.** It
-    changes the creation flow, `bun run bootstrap`, and every test that creates
-    an entity — its own increment, not an appendix to another one.
-  - **Found by asking where the adapters would get their keys**, not by
-    reviewing the crypto. The crypto is right; the custody around it was not.
+**Corrected 2026-09-05, measured rather than assumed.** Two items previously
+listed here were already done, and a stale "not built" is the worse direction —
+it invites someone to build a second one, which is the failure this file's own
+header warns about:
 
-- **Signing the envelope** — authenticity, still the Ed25519 half. Sealing
-  deliberately says nothing about who sent a message.
-- **Per-recipient content-key wrapping for channels.** `messages.text` is one
-  column; migration 7 split *delivery* per recipient, not *content*. One content
-  key wrapped per recipient, not N ciphertexts.
-- **Wiring into `MessageSendService`**, the single authoritative send path, plus
-  the migration that adds entity encryption keys.
-- **Vouchers and revocations on the wire** — granularity ruled individual, not
-  wildcard: a wildcard would let a FAM compromise mint agents, which is the
-  property the key model exists to remove.
+- *"Wiring into `MessageSendService`"* — done. The service carries
+  `sendSealedDirectMessage` and `sendSealedChannelMessage`, and
+  `encryption_public_key` is in the schema (migration 17).
+- *"Vouchers and revocations on the wire"* — the routes exist and are
+  registered (`src/server/routes/vouchers.ts`). **The granularity ruling stands
+  and is worth keeping:** individual, not wildcard — a wildcard would let a FAM
+  compromise mint agents, which is the property the key model exists to remove.
+  What remains is federation-scoped: vouchers crossing a server boundary, which
+  cannot be built or tested until there are two servers.
 
 Federation remains the largest outstanding item in the project, and every
 "pre-alpha, not ready to deploy" statement still rests on it.

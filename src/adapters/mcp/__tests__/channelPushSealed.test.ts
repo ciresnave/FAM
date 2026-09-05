@@ -1,4 +1,7 @@
-import { test, expect, describe, beforeAll } from 'bun:test';
+import { test, expect, describe, beforeAll, beforeEach } from 'bun:test';
+import { mkdtemp } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { ChannelPushHandler } from '../channel-push';
 import { generateKeyPair, generateEncryptionKeyPair, bufferToBase64 } from '../../../crypto/keys';
 import { prepareSealedDirect } from '../../../crypto/outgoing';
@@ -18,6 +21,19 @@ import { prepareSealedDirect } from '../../../crypto/outgoing';
 //
 // as though a person had written it, with nothing anywhere reporting a problem.
 // ============================================================================
+
+// ⚠️ TEMP STORES, BECAUSE THE DEFAULTS ARE THE DEVELOPER'S REAL HOME DIRECTORY.
+// Without these, this file wrote `alice@example.com` into an actual
+// `~/.fam/seen-messages.json` — and the NEXT run read it back and refused a
+// fixture as a replay. The suite passed once and then failed, with the cause
+// sitting outside the repository. A fresh directory per test also means these
+// cannot leak into each other.
+let stores: { seenPath: string; anchorsPath: string };
+
+beforeEach(async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'fam-push-'));
+  stores = { seenPath: join(dir, 'seen.json'), anchorsPath: join(dir, 'anchors.json') };
+});
 
 let alice: { publicKey: Uint8Array; privateKey: Uint8Array };
 let mallory: { publicKey: Uint8Array; privateKey: Uint8Array };
@@ -115,7 +131,9 @@ describe('a sealed push reaching an agent', () => {
       mcp.server,
       fakeClient(aliceDirectory()),
       'Bob',
-      bufferToBase64(bobEnc.privateKey)
+      bufferToBase64(bobEnc.privateKey),
+      BOB,
+      stores
     );
 
     await deliver(handler, await sealedPush(alice.privateKey, 'the actual message'));
@@ -132,7 +150,9 @@ describe('a sealed push reaching an agent', () => {
       mcp.server,
       fakeClient(aliceDirectory()),
       'Bob',
-      bufferToBase64(bobEnc.privateKey)
+      bufferToBase64(bobEnc.privateKey),
+      BOB,
+      stores
     );
 
     await deliver(handler, await sealedPush(alice.privateKey, 'x'));
@@ -149,7 +169,9 @@ describe('⚠️ a forged sealed push', () => {
       mcp.server,
       fakeClient(aliceDirectory()),
       'Bob',
-      bufferToBase64(bobEnc.privateKey)
+      bufferToBase64(bobEnc.privateKey),
+      BOB,
+      stores
     );
 
     await deliver(handler, await sealedPush(mallory.privateKey, 'FORGED-SENTINEL-11c2'));
@@ -169,7 +191,9 @@ describe('an entity with no encryption key', () => {
       mcp.server,
       fakeClient(aliceDirectory()),
       'Bob',
-      null
+      null,
+      BOB,
+      stores
     );
 
     await deliver(handler, await sealedPush(alice.privateKey, 'unreachable body'));
@@ -187,7 +211,9 @@ describe('an unsealed push', () => {
       mcp.server,
       fakeClient(aliceDirectory()),
       'Bob',
-      bufferToBase64(bobEnc.privateKey)
+      bufferToBase64(bobEnc.privateKey),
+      BOB,
+      stores
     );
 
     await deliver(handler, {

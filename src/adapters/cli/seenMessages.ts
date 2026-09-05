@@ -41,7 +41,7 @@ async function read(path: string): Promise<StoredSighting[]> {
 export async function loadSeen(
   now: Date,
   windowMs: number,
-  path: string = DEFAULT_PATH
+  path: string | undefined = DEFAULT_PATH
 ): Promise<SeenMessage[]> {
   const all = await read(path);
   const cutoff = now.getTime() - windowMs;
@@ -61,7 +61,7 @@ export async function recordSeen(
   sighting: SeenMessage,
   now: Date,
   windowMs: number,
-  path: string = DEFAULT_PATH
+  path: string | undefined = DEFAULT_PATH
 ): Promise<void> {
   const all = await read(path);
   const cutoff = now.getTime() - windowMs;

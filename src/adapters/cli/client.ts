@@ -70,6 +70,40 @@ export async function apiRequest<T>(
 let cachedSession: { entityId: string; sessionId: string } | null = null;
 
 /**
+ * The active entity's identity private key, decrypted with the passkey.
+ *
+ * ⚠️ EXPORTED SO THERE IS STILL ONLY ONE PLACE THAT DERIVES IT. Signing a
+ * sealed envelope needs this key, and `getEntitySession` returns only the
+ * session id. Re-deriving it at the send site would be a second route from
+ * credentials to a signing key — and the two would agree until one of them
+ * stopped going through `readIdentityKey`, which is exactly the bug that broke
+ * every key-file consumer once already.
+ *
+ * NOT cached. The session id is worth holding for the process lifetime; a
+ * private key is not, and nothing here needs it more than once per send.
+ */
+export async function loadIdentityPrivateKey(config: CliConfig): Promise<string> {
+  const credentials = await getActiveEntityCredentials();
+  const passkey = requirePasskey(config);
+  const keyFile: EncryptedKeyFile = JSON.parse(credentials.encrypted_key_file);
+
+  // Through readIdentityKey, never the raw blob: a key file now carries BOTH
+  // keys as JSON, and feeding that to a signer fails at key import with an
+  // error that points nowhere near the cause.
+  return readIdentityKey(await decryptPrivateKey(keyFile, passkey));
+}
+
+function requirePasskey(config: CliConfig): string {
+  const passkey = config.passkey || process.env.FAM_PASSKEY;
+  if (!passkey) {
+    throw new Error(
+      'A passkey is required to authenticate this entity. Pass --passkey or set FAM_PASSKEY.'
+    );
+  }
+  return passkey;
+}
+
+/**
  * Establish (or reuse) an entity session: decrypt the private key with the
  * passkey, answer the server's nonce challenge, and keep the session id.
  */
@@ -82,17 +116,9 @@ export async function getEntitySession(
     return cachedSession;
   }
 
-  const passkey = config.passkey || process.env.FAM_PASSKEY;
-  if (!passkey) {
-    throw new Error(
-      'A passkey is required to authenticate this entity. Pass --passkey or set FAM_PASSKEY.'
-    );
-  }
+  const passkey = requirePasskey(config);
 
   const keyFile: EncryptedKeyFile = JSON.parse(credentials.encrypted_key_file);
-  // Through readIdentityKey, never the raw blob: a key file now carries BOTH
-  // keys as JSON, and feeding that to a signer fails at key import with an
-  // error that points nowhere near the cause.
   const privateKeyBase64 = readIdentityKey(await decryptPrivateKey(keyFile, passkey));
 
   const { nonce } = await apiRequest<{ nonce: string }>(config, '/entities/connect', {

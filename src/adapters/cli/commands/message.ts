@@ -1,7 +1,8 @@
 // Message Commands - Send and Read Messages
 
-import { entityRequest } from '../client';
+import { entityRequest, getEntitySession, loadIdentityPrivateKey } from '../client';
 import type { CliConfig } from '../config';
+import { sendDirect } from '../sendMessage';
 
 // ============================================================================
 // Types
@@ -28,7 +29,8 @@ interface SendMessageResponse {
 export async function runSendCommand(
   target: string,
   text: string,
-  config: CliConfig
+  config: CliConfig,
+  flags?: Record<string, string | boolean>
 ): Promise<void> {
   if (!text) {
     throw new Error('Usage: fam send <target> <message>');
@@ -56,17 +58,48 @@ export async function runSendCommand(
     toEntity = target;
   }
   
-  const body: Record<string, string> = { text };
+  // ⚠️ A DIRECT MESSAGE SEALS. A CHANNEL MESSAGE STILL DOES NOT, AND SAYS SO.
+  //
+  // Sealing to a channel needs a group envelope — one content key wrapped per
+  // member — and the member keys have to be gathered first. That is built
+  // (`src/crypto/groupSealing.ts`) but not wired, and wiring it is its own
+  // change. What must NOT happen meanwhile is a channel send that looks
+  // identical to a sealed one, because "it sent fine" is how an unsealed path
+  // stays unnoticed. So it is named at the moment it happens.
   if (channelId) {
-    body.channel_id = channelId;
-  } else if (toEntity) {
-    body.to_entity = toEntity;
+    const response = await entityRequest<SendMessageResponse>(config, '/messages/send', {
+      channel_id: channelId,
+      text,
+    });
+    console.log(`Message sent to channel ${channelId} (ID: ${response.message_id})`);
+    console.log('NOT SEALED: channel messages are not end-to-end encrypted yet.');
+    return;
   }
-  
-  const response = await entityRequest<SendMessageResponse>(config, '/messages/send', body);
-  
-  const targetDisplay = channelId ? `channel ${channelId}` : toEntity;
-  console.log(`Message sent to ${targetDisplay} (ID: ${response.message_id})`);
+
+  const { entityId, sessionId } = await getEntitySession(config);
+  const senderIdentityPrivateKey = await loadIdentityPrivateKey(config);
+
+  const outcome = await sendDirect(config, {
+    senderId: entityId,
+    senderIdentityPrivateKey,
+    sessionId,
+    recipientId: toEntity!,
+    text,
+    // Explicit, not inferred. `--plaintext` is the only way to take the
+    // unsealed path, and taking it requires having typed the word.
+    allowPlaintext: flags?.plaintext === true,
+  });
+
+  console.log(`Message sent to ${toEntity} (ID: ${outcome.messageId})`);
+
+  if (outcome.sealed) {
+    console.log('Sealed: the server cannot read this message.');
+  } else {
+    // The downgrade is reported every time it happens. A one-line difference
+    // that a person can miss is still better than none, and this one names the
+    // recipient and the reason rather than saying "unencrypted".
+    console.log(`NOT SEALED: ${outcome.downgradeReason}`);
+  }
 }
 
 // ============================================================================

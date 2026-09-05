@@ -197,6 +197,28 @@ async function checkSender(
   // with the other's verifier fails and reports the SENDER as unverifiable. The
   // recipient would then be told a third party is suspect when the real answer
   // is that this client read the wrong format.
+  // ⚠️ "I HAVE NO KEY FOR THIS SENDER" IS NOT "THIS SIGNATURE IS BAD", AND
+  // THESE TWO WERE THE SAME SENTENCE UNTIL IT WAS MEASURED. An empty key fails
+  // verification exactly like a wrong one, so an unknown sender was reported as
+  // a failed signature — an ACCUSATION against a named third party, produced by
+  // a gap in the reader's own directory.
+  //
+  // Both still withhold the content; that part was already right and must stay.
+  // What differs is the remedy, and they point at different people:
+  //
+  //   unknown  -> a fact about THIS READER. Obtain the key; the sender may be on
+  //               another account, or created since the directory was fetched.
+  //   unverified -> a claim about the MESSAGE. Someone signed it who is not who
+  //               it says.
+  if (!keys.senderIdentityPublicKey) {
+    return (
+      `This message says it is from ${message.from_entity}, and no identity key is known ` +
+      `for that sender, so who wrote it cannot be established. It is not shown. This is ` +
+      `NOT a failed signature — nothing here suggests the message is forged, only that ` +
+      `this client has no key to check it against.`
+    );
+  }
+
   let verified = false;
   try {
     verified = isGroup

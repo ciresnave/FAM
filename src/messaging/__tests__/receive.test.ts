@@ -302,3 +302,81 @@ describe('a sealed CHANNEL message', () => {
     expect(result.kind).toBe('unreadable');
   });
 });
+
+// ============================================================================
+// ⚠️ "I DO NOT KNOW WHO THIS IS" IS NOT "THIS IS FORGED".
+//
+// Measured on merged code: a sender absent from the reader's directory produced
+// a reason BYTE-IDENTICAL to a genuine forgery — "its signature does not verify
+// against that sender key". The CLI passes '' for a sender it has no key for,
+// and an empty key fails verification like any wrong key.
+//
+// Both must withhold the content; that part was right. But the two states have
+// OPPOSITE remedies:
+//
+//   no key for this sender -> a fact about the READER. Fetch their key; they may
+//                             be on another account, or newly created.
+//   signature does not     -> a claim about the MESSAGE, and an accusation
+//   verify                    against a named third party.
+//
+// Reporting the first as the second sends someone to investigate a person who
+// has done nothing. It is the same defect as running a group envelope through
+// the flat verifier and calling the SENDER unverifiable — a wrong diagnosis
+// that accuses, rather than a bare failure.
+// ============================================================================
+
+describe('⚠️ an unverifiable sender vs an unknown one', () => {
+  test('a sender with no known key is reported as UNKNOWN, not as forged', async () => {
+    const envelope = await sealedFrom(alice.privateKey, { text: 'perfectly genuine' });
+
+    const result = await readIncoming(incoming(envelope), {
+      recipientEncryptionPrivateKey: bobPrivate(),
+      // What the CLI passes when the directory has no entry for this sender.
+      senderIdentityPublicKey: '',
+    });
+
+    expect(result.kind).toBe('unreadable');
+    if (result.kind !== 'unreadable') throw new Error('unreachable');
+
+    // The remedy is to obtain the key, so the reason must say so...
+    expect(result.reason).toMatch(/no key|not know|cannot establish|unknown/i);
+    // ...and must NOT accuse the sender of a bad signature.
+    expect(result.reason).not.toMatch(/does not verify/i);
+  });
+
+  test('the two diagnoses are different strings', async () => {
+    // The decisive assertion, and the one that fails on the merged code: both
+    // paths produced the same sentence, so a reader could not tell which had
+    // happened.
+    const genuine = await sealedFrom(alice.privateKey);
+    const forged = await sealedFrom(mallory.privateKey);
+
+    const unknown = await readIncoming(incoming(genuine), {
+      recipientEncryptionPrivateKey: bobPrivate(),
+      senderIdentityPublicKey: '',
+    });
+    const forgery = await readIncoming(incoming(forged), {
+      recipientEncryptionPrivateKey: bobPrivate(),
+      senderIdentityPublicKey: alicePublic(),
+    });
+
+    if (unknown.kind !== 'unreadable' || forgery.kind !== 'unreadable') {
+      throw new Error('both should withhold');
+    }
+    expect(unknown.reason).not.toBe(forgery.reason);
+  });
+
+  test('⚠️ BOTH still withhold the content — the posture is unchanged', async () => {
+    // The fix must not become "show it because we are unsure". An unknown
+    // sender is LESS established than a failed one, not more.
+    const envelope = await sealedFrom(alice.privateKey, { text: 'UNKNOWN-SENDER-SENTINEL' });
+
+    const result = await readIncoming(incoming(envelope), {
+      recipientEncryptionPrivateKey: bobPrivate(),
+      senderIdentityPublicKey: '',
+    });
+
+    expect(result.kind).toBe('unreadable');
+    expect(JSON.stringify(result)).not.toContain('UNKNOWN-SENDER-SENTINEL');
+  });
+});

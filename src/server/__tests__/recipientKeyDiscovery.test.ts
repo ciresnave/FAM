@@ -41,7 +41,13 @@ let recipientEncryptionPublic: string;
 /** The half that is never sent anywhere; used to prove the discovered key works. */
 let recipientEncryptionPrivate: string;
 
-async function post(path: string, body: unknown): Promise<{ status: number; data: any }> {
+// A literal union rather than `string`, following `sealedSendRoute.test.ts`.
+// The value can then only be a path this file names, which is both true and
+// the reason the scanner stops calling it user-controlled — a helper taking
+// `string` looks identical to one that forwards a caller-supplied URL.
+type Endpoint = '/entities/list';
+
+async function post(path: Endpoint, body: unknown): Promise<{ status: number; data: any }> {
   const res = await fetch(`${URL_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

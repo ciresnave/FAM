@@ -3,7 +3,7 @@
 import type { CliConfig } from './config';
 import { getServerUrl, getAccountToken, getActiveEntityCredentials } from './config';
 import { decryptPrivateKey } from '../../crypto/encrypt';
-import { readIdentityKey } from './keyMaterial';
+import { readIdentityKey, readEncryptionKey } from './keyMaterial';
 import { sign, base64ToBuffer } from '../../crypto/keys';
 import type { EncryptedKeyFile } from '../../types';
 
@@ -91,6 +91,23 @@ export async function loadIdentityPrivateKey(config: CliConfig): Promise<string>
   // keys as JSON, and feeding that to a signer fails at key import with an
   // error that points nowhere near the cause.
   return readIdentityKey(await decryptPrivateKey(keyFile, passkey));
+}
+
+/**
+ * The active entity's encryption private key, or null if it has none.
+ *
+ * ⚠️ NULL IS A REAL ANSWER AND IS RETURNED AS ONE. An entity whose key file
+ * predates encryption keys cannot open sealed mail — a fact about that entity
+ * with a remedy, not an error. Throwing here would make an ordinary state
+ * indistinguishable from a corrupt key file, and the natural response to
+ * "corrupt" is deletion, which destroys the identity key it still holds.
+ */
+export async function loadEncryptionPrivateKey(config: CliConfig): Promise<string | null> {
+  const credentials = await getActiveEntityCredentials();
+  const passkey = requirePasskey(config);
+  const keyFile: EncryptedKeyFile = JSON.parse(credentials.encrypted_key_file);
+
+  return readEncryptionKey(await decryptPrivateKey(keyFile, passkey));
 }
 
 function requirePasskey(config: CliConfig): string {

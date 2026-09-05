@@ -24,7 +24,7 @@ import { FamClient } from './client';
 import { ChannelPushHandler } from './channel-push';
 import { FAM_TOOLS } from './tools';
 import { decryptPrivateKey } from '../../crypto/encrypt';
-import { readIdentityKey } from '../cli/keyMaterial';
+import { readIdentityKey, readEncryptionKey } from '../cli/keyMaterial';
 import { sign, base64ToBuffer } from '../../crypto/keys';
 import type { EncryptedKeyFile } from '../../types';
 import { getActiveEntityCredentials } from '../cli/config';
@@ -974,7 +974,21 @@ When you start, proactively list entities and channels to understand who's avail
   log('MCP connected');
   
   // 8. Start channel push handler
-  const pushHandler = new ChannelPushHandler(mcp, client, credentials.display_name || credentials.entity_id);
+  // ⚠️ THE ENCRYPTION KEY IS PASSED IN, NOT LOOKED UP LATER. Without it the
+  // push handler cannot open a sealed message and would push the ENVELOPE into
+  // an agent's context as though someone had written it. Null is a real value
+  // here — an entity predating encryption keys has none — and the handler says
+  // so specifically rather than reporting a damaged message.
+  const encryptionPrivateKey = readEncryptionKey(
+    await decryptPrivateKey(keyFileData, passkey)
+  );
+
+  const pushHandler = new ChannelPushHandler(
+    mcp,
+    client,
+    credentials.display_name || credentials.entity_id,
+    encryptionPrivateKey
+  );
   pushHandler.start();
   log('Channel push handler started');
   

@@ -469,12 +469,30 @@ GET /health                       — server status
 
 ## Open Questions
 
-1. **OAuth 2.0 providers**: Which providers to support initially? (Google, GitHub, both?)
-2. **Key pair algorithm**: Ed25519 vs RSA vs ECDSA?
-3. **Channel permissions**: Should channels have fine-grained permissions beyond owner/admin/member?
-4. **Message retention**: How long to keep message history?
-5. **Rate limiting**: How to prevent abuse?
-6. **Encryption at rest**: Should messages be encrypted in the database?
+**Five of the six below were answered by the code and never struck from this
+list. Corrected 2026-09-05, each verified against `origin/main` rather than
+inherited** — a question listed as open invites someone to re-decide something
+already decided, and to build a second answer beside the first.
+
+1. ~~**OAuth 2.0 providers**~~ — **ANSWERED: both.** Google and GitHub are
+   implemented in `src/auth/oauth.ts`.
+2. ~~**Key pair algorithm**~~ — **ANSWERED: Ed25519 for identity, X25519 for
+   encryption.** Two keypairs, not one. ⚠️ `src/crypto/keys.ts` warns at length
+   against merging them: an Ed25519 public key *imports* as X25519 and derives
+   32 plausible bytes, so the shortcut produces ciphertext the recipient can
+   never open and every check short of testing agreement passes.
+3. **Channel permissions**: should channels have fine-grained permissions beyond
+   owner/admin/member? — **STILL OPEN.** Verified: `ChannelMemberRole` is
+   `'owner' | 'admin' | 'member'` and nothing else. This is the only genuinely
+   open question in this list.
+4. ~~**Message retention**~~ — **RULED by CireSnave 2026-09-02: none.** The
+   question was dissolved rather than answered; see ROADMAP "Retention — RULED".
+5. ~~**Rate limiting**~~ — **ANSWERED: built.** Per-entity limiter applied in
+   the message and entity routes.
+6. ~~**Encryption at rest**~~ — **ANSWERED: built, and it is not the same thing
+   as sealing.** `message-encryption.ts` encrypts rows under
+   `FAM_SERVER_SECRET`, so the server reads everything; `sealing.ts` is
+   end-to-end, so it reads nothing. **Say under whose key.**
 
 ---
 

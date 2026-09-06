@@ -1,0 +1,1 @@
+$ oxlint -c .oxlintrc.json src

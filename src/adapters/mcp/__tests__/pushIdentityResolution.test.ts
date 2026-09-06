@@ -6,6 +6,7 @@ import { ChannelPushHandler } from '../channel-push';
 import { generateKeyPair, generateEncryptionKeyPair, bufferToBase64 } from '../../../crypto/keys';
 import { prepareSealedDirect } from '../../../crypto/outgoing';
 import { signVoucher } from '../../../crypto/voucher';
+import { containsNowhere } from '../../../testing/allStrings';
 
 // ============================================================================
 // ⚠️ WRITTEN AS A SELF-CORRECTION. I CLAIMED THIS PATH WAS COMPLETE AND IT WAS
@@ -189,7 +190,7 @@ describe('the MCP push path resolves sender identity', () => {
     expect(mcp.pushed[0]!.content).toContain('[not shown]');
     expect(mcp.pushed[0]!.content).toMatch(/differ|disagree|does not match/i);
     // The forged body must not reach the agent by any route.
-    expect(JSON.stringify(mcp.pushed[0])).not.toContain('FORGED-BY-RELAY-SENTINEL');
+    expect(containsNowhere(mcp.pushed[0], 'FORGED-BY-RELAY-SENTINEL')).toBe(true);
   });
 
   test('an anchor with NO records is unvouched — the server key, labelled', async () => {

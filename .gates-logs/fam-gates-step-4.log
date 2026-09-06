@@ -1,0 +1,102 @@
+$ bun test --timeout 60000
+bun test v1.3.14 (0d9b296a)
+
+src\server\__tests__\adminConsole.test.ts:
+{"timestamp":"2026-09-06T11:40:53.768Z","level":"WARN","context":"fam","message":"No OAuth providers configured (GOOGLE_CLIENT_ID/SECRET or GITHUB_CLIENT_ID/SECRET). Account creation will not work."}
+{"timestamp":"2026-09-06T11:40:53.798Z","level":"INFO","context":"fam","message":"FAM server running","port":17901,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:40:53.977Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants"}
+{"timestamp":"2026-09-06T11:40:53.978Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants"}
+{"timestamp":"2026-09-06T11:40:53.980Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants"}
+{"timestamp":"2026-09-06T11:40:53.982Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants/list"}
+{"timestamp":"2026-09-06T11:40:53.983Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants/list"}
+{"timestamp":"2026-09-06T11:40:53.992Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/session/destroy"}
+{"timestamp":"2026-09-06T11:40:53.993Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants"}
+{"timestamp":"2026-09-06T11:40:53.995Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants"}
+{"timestamp":"2026-09-06T11:40:53.996Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants"}
+{"timestamp":"2026-09-06T11:40:53.997Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/permissions"}
+{"timestamp":"2026-09-06T11:40:53.999Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/grants/list"}
+{"timestamp":"2026-09-06T11:40:54.009Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/accounts/create-entity"}
+{"timestamp":"2026-09-06T11:40:54.011Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/accounts/create-entity"}
+{"timestamp":"2026-09-06T11:40:54.012Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/accounts/revoke-entity"}
+{"timestamp":"2026-09-06T11:40:54.015Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/entities/availability"}
+{"timestamp":"2026-09-06T11:40:54.016Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/entities/availability"}
+{"timestamp":"2026-09-06T11:40:54.017Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/entities/availability"}
+{"timestamp":"2026-09-06T11:40:54.018Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/entities/rederive-queue"}
+{"timestamp":"2026-09-06T11:40:54.019Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"console@example.com","method":"POST","path":"/admin/api/entities/rederive-queue"}
+{"timestamp":"2026-09-06T11:40:54.023Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\server\__tests__\deliveryLegibility.test.ts:
+{"timestamp":"2026-09-06T11:40:54.051Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"live@legible@example.com","sessionId":"869da9ce-5055-4040-b5dc-bddd6d32ad24"}
+{"timestamp":"2026-09-06T11:40:54.051Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"paused@legible@example.com","sessionId":"2ee4e37e-b34e-43f9-8a44-89572624ebbd"}
+{"timestamp":"2026-09-06T11:40:54.059Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"witness@legible@example.com","sessionId":"5108792d-2408-46fa-9af3-2d68a8f06ba3"}
+
+src\server\__tests__\encryptionKeyRoute.test.ts:
+{"timestamp":"2026-09-06T11:40:54.078Z","level":"INFO","context":"fam","message":"FAM server running","port":17913,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:40:54.096Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\server\__tests__\entityKeyCustody.test.ts:
+{"timestamp":"2026-09-06T11:40:54.123Z","level":"INFO","context":"fam","message":"FAM server running","port":17931,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:40:54.139Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\server\__tests__\integration.test.ts:
+{"timestamp":"2026-09-06T11:40:54.202Z","level":"INFO","context":"fam","message":"FAM server running","port":0,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:42:50.399Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\server\__tests__\recipientKeyDiscovery.test.ts:
+{"timestamp":"2026-09-06T11:42:50.440Z","level":"INFO","context":"fam","message":"FAM server running","port":17961,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:42:50.452Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\server\__tests__\sealedSendRoute.test.ts:
+{"timestamp":"2026-09-06T11:42:50.487Z","level":"INFO","context":"fam","message":"FAM server running","port":17921,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:42:50.509Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\server\__tests__\sealedSendWebSocket.test.ts:
+{"timestamp":"2026-09-06T11:42:50.533Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"bf3c44bd-fd7d-4f0d-96fe-8e5ea465e4ac"}
+{"timestamp":"2026-09-06T11:42:50.559Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"be3e2362-772e-4917-99be-8f04692467f9"}
+{"timestamp":"2026-09-06T11:42:50.586Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"c745996f-47d6-4599-91b2-a619bf27b2e8"}
+{"timestamp":"2026-09-06T11:42:50.605Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"612f9ed4-8271-45d3-b5f6-5a7672a2b25b"}
+{"timestamp":"2026-09-06T11:42:50.630Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"f157bd66-9eba-4c02-bcea-df80b8130eea"}
+{"timestamp":"2026-09-06T11:42:50.650Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"ce2be696-bb64-4ec0-884e-3ce419769d20"}
+{"timestamp":"2026-09-06T11:42:50.677Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"45c277c6-411f-4423-8afb-a97ae9f7d6d2"}
+{"timestamp":"2026-09-06T11:42:50.702Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"alice@wssealed.example.com","sessionId":"d11f2d9b-4648-4682-9ffe-6011cf4ebb10"}
+{"timestamp":"2026-09-06T11:42:50.708Z","level":"ERROR","context":"fam","message":"Failed to send sealed message","error":"[object Object]"}
+
+src\server\__tests__\voucherRoutes.test.ts:
+{"timestamp":"2026-09-06T11:42:50.736Z","level":"INFO","context":"fam","message":"FAM server running","port":17941,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:42:50.771Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\server\__tests__\websocket.test.ts:
+{"timestamp":"2026-09-06T11:42:50.801Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"a@ws.example.com","sessionId":"e128a72e-6bc5-4118-a72b-ea4572b6e84e"}
+{"timestamp":"2026-09-06T11:42:50.820Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"a@ws.example.com","sessionId":"22e85e19-6378-45af-ae97-430ef24bdb08"}
+{"timestamp":"2026-09-06T11:42:50.839Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"b@ws.example.com","sessionId":"e0d5d88a-06ed-4674-8373-d504c86927f7"}
+{"timestamp":"2026-09-06T11:42:50.839Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"a@ws.example.com","sessionId":"796fb2e9-49fe-40bc-8f3b-4dc3bf5c5ddb"}
+{"timestamp":"2026-09-06T11:42:50.862Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"a@ws.example.com","sessionId":"e41b5fa3-b436-47ec-9fbb-27a16db2f017"}
+{"timestamp":"2026-09-06T11:42:50.862Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"b@ws.example.com","sessionId":"f59a9333-b99e-44c3-bac5-824764cd739f"}
+{"timestamp":"2026-09-06T11:42:50.903Z","level":"INFO","context":"fam","message":"WebSocket connected","entityId":"a@ws.example.com","sessionId":"7cea7fa4-219c-4993-a930-69a20ebb6eb8"}
+
+src\adapters\cli\__tests__\publishEncryptionKey.test.ts:
+{"timestamp":"2026-09-06T11:44:44.354Z","level":"INFO","context":"fam","message":"FAM server running","port":17951,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:45:09.926Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\adapters\cli\__tests__\sendChannel.test.ts:
+{"timestamp":"2026-09-06T11:45:10.033Z","level":"INFO","context":"fam","message":"FAM server running","port":17991,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:45:10.189Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\adapters\cli\__tests__\sendDirect.test.ts:
+{"timestamp":"2026-09-06T11:45:10.265Z","level":"INFO","context":"fam","message":"FAM server running","port":17971,"host":"127.0.0.1"}
+{"timestamp":"2026-09-06T11:45:10.357Z","level":"INFO","context":"fam","message":"FAM server stopped"}
+
+src\adapters\mcp\__tests__\channelPushSealed.test.ts:
+[fam-push] Pushed message from alice@example.com: the actual message
+[fam-push] Pushed message from alice@example.com: x
+[fam-push] Pushed message from alice@example.com: [not shown] This message claims to be from alice@example.com but its signature d
+[fam-push] Pushed message from alice@example.com: [not shown] This message is sealed, and this entity has no encryption key to ope
+[fam-push] Pushed message from alice@example.com: plain and ordinary
+
+src\server\middleware\__tests__\adminAuth.test.ts:
+{"timestamp":"2026-09-06T11:45:10.677Z","level":"INFO","context":"fam","message":"Admin write with no Origin header","accountId":"adminauth@example.com","method":"POST","path":"/admin/api/grants"}
+
+ 753 pass
+ 0 fail
+ 1601 expect() calls
+Ran 753 tests across 69 files. [272.70s]

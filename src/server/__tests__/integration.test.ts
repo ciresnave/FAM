@@ -10,12 +10,34 @@ import { hashToken } from '../../auth/oauth';
 // ============================================================================
 
 let serverHandle: ReturnType<typeof startServer>;
-const TEST_PORT = 17899;
 const TEST_HOST = '127.0.0.1';
-const TEST_SERVER_URL = `http://${TEST_HOST}:${TEST_PORT}`;
 const TEST_SECRET = process.env.FAM_SERVER_SECRET!;
 
-process.env.FAM_PORT = String(TEST_PORT);
+/**
+ * ⚠️ AN EPHEMERAL PORT, BECAUSE A FIXED ONE MADE THIS FILE FAIL 2 RUNS IN 3.
+ *
+ * This file used port 17899. Measured: back-to-back suite runs leave client
+ * sockets to that port in TIME_WAIT, and the next run's `Bun.serve` fails to
+ * bind — `EADDRINUSE`, thrown from `beforeAll`, which takes ALL 68 TESTS IN
+ * THIS FILE WITH IT.
+ *
+ *     run 1  Ran 692 tests  [122s]  1 fail
+ *     run 2  Ran 759 tests  [234s]  0 fail
+ *     run 3  Ran 692 tests  [137s]  1 fail
+ *     759 - 692 = 67 lost, + 1 reported failed = 68. The arithmetic closes.
+ *     netstat: five sockets to 127.0.0.1:17899 in TIME_WAIT, live.
+ *
+ * ⚠️ NOT A COLLISION BETWEEN TEST FILES — every file has a unique port,
+ * verified. It is one file colliding with its own PREVIOUS RUN, and the run
+ * duration (122–234s) straddles the TIME_WAIT window, which is exactly why it
+ * is intermittent. In CI — fresh runner, one run — it never fires. It fires on
+ * the workflow of running the suite repeatedly, which is what a person does.
+ *
+ * Port 0 asks the OS for a free one, so there is nothing to collide with. The
+ * URL is therefore built AFTER the bind, from the port actually assigned.
+ */
+let TEST_SERVER_URL: string;
+
 process.env.FAM_HOST = TEST_HOST;
 
 // ============================================================================
@@ -186,7 +208,11 @@ describe('FAM Server Integration', () => {
 
   beforeAll(async () => {
     await seedAccount(testAccountId, testToken);
-    serverHandle = startServer({ port: TEST_PORT, host: TEST_HOST });
+    serverHandle = startServer({ port: 0, host: TEST_HOST });
+    TEST_SERVER_URL = `http://${TEST_HOST}:${serverHandle.port}`;
+    // The env var is read by code under test, so it must match the port the OS
+    // actually gave us rather than one chosen in advance.
+    process.env.FAM_PORT = String(serverHandle.port);
     await Bun.sleep(500);
   });
 

@@ -1268,6 +1268,27 @@ worse than an absent field: an absence prompts a design, a present-but-inert
 field terminates it.** Whoever implements replay checking should replace the
 wall-clock value rather than assume it already is that.
 
+### Deferrals with NO DETECTOR
+
+**Recorded here because a deferral nobody can detect is one nobody will
+remember, and this document is where readers look for what is and is not done.**
+Everything else deferred in this project now has a tripwire in
+`src/__tests__/deferrals.test.ts` that goes red when the work is done and names
+its own deletion. These do not, and the reason is stated rather than implied.
+
+- ⚠️ **`claude-peers` `whoami` reaches a lane only when that lane restarts.**
+  **DETECTOR: NONE.** The completion condition is "every peer has restarted at
+  least once", and its subject is OTHER AGENTS' PROCESSES — nothing in this
+  repository can observe them. An unscheduled event can be given a detector by
+  scheduling it; a subject the tree cannot see cannot.
+
+  **A weak detector here would be worse than none**: it would convert "nobody is
+  watching this" into "something is watching this", and only the first is true.
+  The two real moves are to make the subject observable (a process reports in,
+  and the ABSENCE of a report is the red), or to convert the deferral into one
+  about something the tree CAN see (the code path consuming `whoami` refuses
+  until it has one). Neither is built. OWNER: FAM lane.
+
 #### Remaining in Phase 5
 
 - **Federation itself.** Nothing below is about local sealing any more; that is

@@ -136,13 +136,116 @@ if (!pipefailSupported) {
 
 console.log(`gates: ${steps.length} step(s) derived from ${WORKFLOW}\n`);
 
+// ⚠️ THE SUITE CAN LOSE A THIRD OF ITSELF AND LOOK LIKE ONE FLAKY TEST.
+//
+// Measured 2026-09-06: `integration.test.ts` failed to bind its fixed port
+// (EADDRINUSE, from client sockets left in TIME_WAIT by the PREVIOUS run), its
+// `beforeAll` threw, and all 68 of its tests vanished:
+//
+//     run 1  Ran 692 tests  1 fail       run 2  Ran 759 tests  0 fail
+//     759 - 692 = 67 lost, + 1 reported failed = 68. The arithmetic closes.
+//
+// The run DID go red, so this is not a silent green. The hazard is subtler, and
+// the author of this comment walked into it: a reader sees ONE failure, calls
+// it flaky, re-runs, gets green, and never learns that 68 tests did not run.
+// A red run does not say HOW MUCH never ran.
+//
+// TWO CHECKS THAT FAIL ON DIFFERENT THINGS, deliberately. A single count floor
+// near today's value reddens on a legitimate deletion, which teaches people to
+// raise it — and a guard that fires on correct behaviour gets disarmed.
+const RUN_COUNT_FLOOR = 600;
+
+/** `Ran 750 tests across 68 files.` — the runner's own denominator. */
+const RAN_LINE = /Ran (\d+) tests across (\d+) files/;
+
+/**
+ * A hook that throws reports as a failure with NO TEST NAME and takes the rest
+ * of its file with it. Matching that SHAPE rather than one error string means a
+ * different cause of the same disappearance still reddens.
+ */
+const ABORTED_FILE = /\(fail\).*> \(unnamed\)/;
+
+/**
+ * ⚠️ A REPO-RELATIVE PATH, BECAUSE TWO PROGRAMS READ IT AND THEY DISAGREE ABOUT
+ * EVERYTHING ELSE.
+ *
+ * The log is WRITTEN by `tee` inside `sh` and READ by `Bun.file`. Two earlier
+ * attempts both failed, and the second failed SILENTLY:
+ *
+ *   1. `process.env.TEMP` — on Windows that is `C:\Users\…`, and the shell ate
+ *      the backslashes:
+ *          tee: 'C:UsersciresAppDataLocalTemp/…': No such file or directory
+ *      Loud, and fixed in minutes.
+ *
+ *   2. `/tmp` — ⚠️ MSYS `sh` resolves that to the Windows temp directory while
+ *      Bun resolves it to `C:\tmp`. `tee` wrote one file, `Bun.file` read a
+ *      different, absent one, the `.catch(() => '')` returned empty, and BOTH
+ *      DETECTORS BELOW BECAME INERT while gates still reported success.
+ *      Found only by forcing the abort case; nothing about the run said so.
+ *
+ * A relative path is the one form both resolve identically, because both run
+ * with the repository root as their working directory.
+ */
+const logDir = '.gates-logs';
+await $`mkdir -p ${logDir}`.nothrow();
+
 for (const [n, step] of steps.entries()) {
   console.log(`── [${n + 1}/${steps.length}] ${step.name}: ${step.command}`);
-  const result = await $`sh -c ${pipefailPrefix + step.command}`.nothrow();
+
+  // Tee rather than capture: the output still streams live AND all of it is
+  // available afterwards. Reading the whole file back is not filtering — a
+  // `| tail` here would be, and this script exists because filtered output hid
+  // a result once.
+  const logPath = `${logDir}/fam-gates-step-${n + 1}.log`;
+  const teed = `${step.command} 2>&1 | tee ${logPath}`;
+  const result = await $`sh -c ${pipefailPrefix + teed}`.nothrow();
+
+  const output = await Bun.file(logPath).text().catch(() => '');
+  const ran = output.match(RAN_LINE);
+
+  // ⚠️ THE DIAGNOSIS IS PRINTED BEFORE THE EXIT, NOT AFTER IT.
+  //
+  // A first version of this checked `exitCode` first and returned — which meant
+  // that when a file DID abort, gates exited on the non-zero code and the
+  // explanation never printed. The detector added nothing in precisely the case
+  // it exists for, and it would have passed a review because it was never
+  // observed in that case.
+  //
+  // An aborting file always makes the runner exit non-zero, so this is the only
+  // ordering in which the message can ever be seen.
+  if (ran && ABORTED_FILE.test(output)) {
+    console.error(
+      `\ngates: ⚠️ A TEST FILE ABORTED at "${step.name}".\n` +
+        `  A hook threw, so that file's remaining tests NEVER RAN and are not in\n` +
+        `  its count. "${ran[0]}" is a true statement about the tests that were\n` +
+        `  ATTEMPTED and says nothing about the ones that were not.\n` +
+        `  DO NOT re-run until green — a red that under-reports its own scope is\n` +
+        `  a red that gets dismissed. Read ${logPath} whole.`
+    );
+  }
+
   if (result.exitCode !== 0) {
     console.error(`\ngates: FAILED at "${step.name}" (exit ${result.exitCode}).`);
     process.exit(result.exitCode);
   }
+
+  // The floor covers the other direction: a run that PASSES while short. It is
+  // deliberately far below today's count, because a floor near the current
+  // value reddens on a legitimate deletion and teaches people to raise it —
+  // and the two checks then fail on different things, which is the point.
+  if (ran) {
+    const count = Number(ran[1]);
+    if (count < RUN_COUNT_FLOOR) {
+      console.error(
+        `\ngates: FAILED at "${step.name}" — only ${count} tests ran, below the\n` +
+          `  floor of ${RUN_COUNT_FLOOR}. The suite PASSING is not the same as the\n` +
+          `  suite RUNNING. If this is a deliberate deletion, lower the floor and\n` +
+          `  say why; if it is not, something stopped early.`
+      );
+      process.exit(1);
+    }
+  }
+
   console.log('');
 }
 

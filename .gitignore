@@ -47,3 +47,6 @@ supertool
 # Claude Code local settings and session memory
 .claude/settings.local.json
 .remember/
+
+# Per-step gate logs, so the run-count detectors can read what tee wrote.
+.gates-logs/

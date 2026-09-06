@@ -23,7 +23,7 @@ import { adminAllowedOrigins } from '../../config';
 function json(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+    headers: { 'Content-Type': 'application/json', ...init.headers },
   });
 }
 

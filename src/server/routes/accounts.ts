@@ -15,13 +15,10 @@ import {
   UnauthorizedError,
   ConflictError,
   NotFoundError,
-  ValidationError,
 } from '../../types/errors';
 import {
   assertRaw32ByteKey,
-  validateAccountId,
   validateEntityId,
-  validateEntityType,
 } from '../../types/validation';
 // ⚠️ DELIBERATELY NO KEY-GENERATION OR KEY-ENCRYPTION IMPORTS HERE.
 //
@@ -35,7 +32,7 @@ import {
 // already had: it accepts a PUBLIC key and there is no code path by which a
 // private one could arrive. An unused import is the difference between a
 // type-level guarantee and a comment asking people not to.
-import { validateAccountToken, requireAccountAuth } from '../middleware/auth';
+import { requireAccountAuth } from '../middleware/auth';
 import { DEFAULT_SERVER_URL } from '../../config';
 
 // ============================================================================

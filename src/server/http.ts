@@ -8,8 +8,8 @@ import { WebSocketManager } from './websocket';
 import { MessageSendService } from './services/messageSend';
 import { PermissionChecker } from './services/permissionChecker';
 import { cleanupStaleSessions, cleanupExpiredOAuthStates, cleanupExpiredInvitations, cleanupExpiredChallenges } from '../db/schema';
-import { ipRateLimiter, entityRateLimiter, getClientIp, RateLimitError } from './middleware/rateLimit';
-import { assignRequestId, getRequestId } from './middleware/requestId';
+import { ipRateLimiter, getClientIp, RateLimitError } from './middleware/rateLimit';
+import { assignRequestId } from './middleware/requestId';
 import { RequestEntityTooLargeError, ValidationError } from '../types/errors';
 import { messageRetentionDays } from '../config';
 import { logger } from '../utils/logger';
@@ -169,7 +169,7 @@ export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> 
         wsManager!.handleClose(ws);
       },
       
-      drain(ws) {
+      drain(_ws) {
         // Handle backpressure
       },
     },
@@ -215,6 +215,22 @@ export function stopServer(target?: ReturnType<typeof Bun.serve>): void {
       wsManager.shutdown();
       wsManager = null;
     }
+
+    // ⚠️ THE CLEANUP TIMER OUTLIVED THE DATABASE IT READS. `cleanupInterval`
+    // was assigned and never cleared anywhere, so after this function closed
+    // the database the interval kept firing and kept calling
+    // `getDatabaseContext()` on it. Every start/stop pair leaked one timer, and
+    // the suite starts a server in roughly ten files.
+    //
+    // Found by a LINTER, not by a failure: oxlint reported the variable as
+    // assigned-but-never-used. The unused variable was not the defect — it was
+    // the only visible symptom of it, because a timer nobody holds is a timer
+    // nobody can stop.
+    if (cleanupInterval) {
+      clearInterval(cleanupInterval);
+      cleanupInterval = null;
+    }
+
     closeDatabase();
   }
 

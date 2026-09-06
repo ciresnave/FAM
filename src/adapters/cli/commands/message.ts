@@ -24,10 +24,6 @@ import { sendDirect, sendToChannel } from '../sendMessage';
 // A local duplicate silently restored what the shared type removed, and it is
 // how `sealed` came to be missing here while the server was sending it.
 
-interface SendMessageResponse {
-  message_id: number;
-}
-
 // ============================================================================
 // Send Command
 // ============================================================================

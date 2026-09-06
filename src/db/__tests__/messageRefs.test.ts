@@ -150,7 +150,7 @@ describe('reproducible references must say when, as whom, and over what', () => 
   });
 
   test('missing CONSTRUCT is refused', () => {
-    const { construct, ...rest } = complete;
+    const { construct: _construct, ...rest } = complete;
     expect(() =>
       ctx.messageRefs.attach(messageId, {
         kind: 'measurement.count', mode: 'reproducible', payload: rest,
@@ -159,7 +159,7 @@ describe('reproducible references must say when, as whom, and over what', () => 
   });
 
   test('missing TAKEN_AT is refused', () => {
-    const { taken_at, ...rest } = complete;
+    const { taken_at: _taken_at, ...rest } = complete;
     expect(() =>
       ctx.messageRefs.attach(messageId, {
         kind: 'measurement.count', mode: 'reproducible', payload: rest,
@@ -171,7 +171,7 @@ describe('reproducible references must say when, as whom, and over what', () => 
   // identity that asked. A stored absence without this cannot be re-read after
   // a privilege change.
   test('missing TAKEN_AS is refused', () => {
-    const { taken_as, ...rest } = complete;
+    const { taken_as: _taken_as, ...rest } = complete;
     expect(() =>
       ctx.messageRefs.attach(messageId, {
         kind: 'measurement.count', mode: 'reproducible', payload: rest,

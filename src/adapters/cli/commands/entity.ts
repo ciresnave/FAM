@@ -136,7 +136,7 @@ async function createEntity(
 
 async function switchToEntity(
   positional: string[],
-  config: CliConfig
+  _config: CliConfig
 ): Promise<void> {
   const entityId = positional[0];
   

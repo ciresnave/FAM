@@ -15,10 +15,12 @@
     "server": "bun server.ts",
     "test": "bun test --timeout 60000",
     "typecheck": "bun run tsc --noEmit",
+    "lint": "oxlint -c .oxlintrc.json src",
     "gates": "bun run src/scripts/gates.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "oxlint": "^1.81.0"
   },
   "peerDependencies": {
     "typescript": "^5"

@@ -20,7 +20,7 @@
 //   4. target=all,    source=account  (score 0)
 
 import type { DatabaseContext } from '../../db/transaction';
-import type { EntityId, Entity, PermissionRule } from '../../types';
+import type { Entity, PermissionRule } from '../../types';
 
 // ============================================================================
 // Permission Checker

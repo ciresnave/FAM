@@ -19,7 +19,7 @@
     "gates": "bun run src/scripts/gates.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "^1.3.11",
     "oxlint": "^1.81.0"
   },
   "peerDependencies": {

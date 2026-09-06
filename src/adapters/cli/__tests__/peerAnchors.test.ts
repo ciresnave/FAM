@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from 'bun:test';
-import { rm, mkdtemp } from 'fs/promises';
+import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { observePeerAnchor, getPeerAnchorKey, acceptPeerAnchorChange } from '../peerAnchors';

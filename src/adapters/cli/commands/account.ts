@@ -11,7 +11,6 @@ import { fetchAccountKey, type Forge } from '../../../federation/accountKey';
 import {
   observePeerAnchor,
   acceptPeerAnchorChange,
-  getPeerAnchorKey,
 } from '../peerAnchors';
 import {
   generateAccountKey,

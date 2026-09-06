@@ -2,7 +2,7 @@
 // Uses Argon2id for key derivation and AES-GCM for encryption
 
 import { deriveKeyArgon2id, generateSalt, bufferToBase64, base64ToBuffer, DEFAULT_ARGON2_PARAMS } from './argon2';
-import type { KdfParams, EncryptedKeyFile } from '../types';
+import type { EncryptedKeyFile } from '../types';
 import { stampVersion, assertFormatSupported } from '../utils/versioning';
 
 // ============================================================================

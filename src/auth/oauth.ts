@@ -2,7 +2,7 @@
 //
 // Supports Google and GitHub as identity providers.
 
-import { hashSha256 } from '../crypto/keys';
+import {  } from '../crypto/keys';
 import type { DatabaseContext } from '../db/transaction';
 import type { Account } from '../types';
 import { AccountProviderMismatchError, UnverifiedEmailError } from '../types/errors';

@@ -4,7 +4,7 @@ import {
   decryptPrivateKey,
 } from '../encrypt';
 import { generateKeyPair, bufferToBase64 } from '../keys';
-import type { EncryptedKeyFile } from '../../types';
+import type {  } from '../../types';
 
 // These tests are the slowest in the suite: Argon2id at 64MB/t=3/p=4, twice
 // each (encrypt + decrypt, or two encrypts). Roughly 3-4s apiece in isolation.

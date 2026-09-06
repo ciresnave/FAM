@@ -374,7 +374,7 @@ export function channelRoutes(ctx: DatabaseContext, wsManager?: WebSocketManager
       method: 'POST',
       pattern: '/channels/invitations',
       handler: async (req) => {
-        const { entityId: entity_id, body } = await requireEntitySession(ctx, req);
+        const { entityId: entity_id } = await requireEntitySession(ctx, req);
         
         if (!entity_id) {
           return new Response(

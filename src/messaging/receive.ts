@@ -186,7 +186,7 @@ export async function readIncoming(
       text,
       seen: { sender: message.from_entity, sequence: Number(envelope?.sequence) },
     };
-  } catch (e) {
+  } catch {
     // ⚠️ THE REASON MUST NOT CARRY THE ENVELOPE. The underlying error can
     // include ciphertext and key material, and a reason string is exactly what
     // gets printed to a person or into a log.

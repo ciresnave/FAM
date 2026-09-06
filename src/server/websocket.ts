@@ -266,7 +266,7 @@ export class WebSocketManager {
    * Send a message to all connected entities.
    */
   broadcast(message: WebSocketMessage, excludeEntityId?: EntityId): void {
-    for (const [sessionId, connection] of this.connections) {
+    for (const connection of this.connections.values()) {
       if (excludeEntityId && connection.entityId === excludeEntityId) {
         continue;
       }
@@ -581,10 +581,10 @@ export class WebSocketManager {
   
   shutdown(): void {
     // Close all connections
-    for (const [sessionId, connection] of this.connections) {
+    for (const connection of this.connections.values()) {
       try {
         connection.ws.close();
-      } catch (e) {
+      } catch {
         // Ignore errors during shutdown
       }
     }

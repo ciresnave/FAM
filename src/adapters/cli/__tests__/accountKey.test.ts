@@ -44,7 +44,7 @@ describe('generating an account key', () => {
     // The real consumer, with the network replaced and nothing else.
     const fetched = await fetchAccountKey(
       { forge: 'github', username: 'holder' },
-      async (url) => ({ ok: true, status: 200, text: async () => fileContent })
+      async () => ({ ok: true, status: 200, text: async () => fileContent })
     );
 
     expect(fetched.publicKey).toBe(generated.publicKey);

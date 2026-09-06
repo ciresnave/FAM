@@ -6,7 +6,7 @@ import { provisionEntity } from '../provision';
 import { publishEncryptionKey } from '../encryptionKey';
 import { createServer } from 'http';
 import { URL } from 'url';
-import { apiRequest } from '../client';
+import {  } from '../client';
 import { saveCredentials, loadCredentials, type CliConfig } from '../config';
 import { DEFAULT_SERVER_URL } from '../../../config';
 

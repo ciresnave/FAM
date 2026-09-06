@@ -242,7 +242,7 @@ async function wrapFor(
       false,
       []
     );
-  } catch (cause) {
+  } catch {
     throw new ValidationError(
       `Recipient ${recipient.entity} has an unusable encryption key. ` +
         `Refusing to seal a message that entity could never open.`

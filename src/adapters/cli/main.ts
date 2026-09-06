@@ -22,16 +22,12 @@ import { runSendCommand } from './commands/message';
 import { runHistoryCommand } from './commands/message';
 import { runChannelCommand } from './commands/channel';
 import { runAccountCommand } from './commands/account';
-import { loadCredentials, type CliConfig } from './config';
+import { type CliConfig } from './config';
 import { DEFAULT_SERVER_URL } from '../../config';
 
 // ============================================================================
 // Logging
 // ============================================================================
-
-function log(msg: string) {
-  console.error(`[fam-cli] ${msg}`);
-}
 
 function fatal(msg: string): never {
   console.error(`[fam-cli] FATAL: ${msg}`);

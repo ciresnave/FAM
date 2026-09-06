@@ -8,6 +8,7 @@
 
 import { apiRequest } from '../client';
 import { fetchAccountKey, type Forge } from '../../../federation/accountKey';
+import { accountKeyFingerprint, fingerprintsMatch } from '../../../crypto/fingerprint';
 import {
   observePeerAnchor,
   acceptPeerAnchorChange,
@@ -43,16 +44,23 @@ export async function runAccountCommand(
     case 'trust':
       await trust(positional, flags);
       break;
+    case 'fingerprint':
+      await showFingerprint();
+      break;
     default:
-      console.log('Usage: fam account <init-key|vouch|trust>');
+      console.log('Usage: fam account <init-key|vouch|trust|fingerprint>');
       console.log('');
       console.log('  init-key            Generate this account\'s signing key.');
       console.log('                      Prints the public half and where to publish it.');
       console.log('  vouch <entity_id>   Sign and publish a voucher binding an entity');
       console.log('                      to its identity key.');
-      console.log('  trust <account_id> --github <user>');
+      console.log('  trust <account_id> --github <user> [--fingerprint <fp>]');
       console.log('                      Fetch and pin a peer account key, so their');
       console.log('                      messages can be verified without the relay.');
+      console.log('                      With --fingerprint, the pin is REFUSED unless');
+      console.log('                      the key matches what you were told out of band.');
+      console.log('  fingerprint         Print YOUR account key fingerprint, to read to');
+      console.log('                      a peer over a channel the relay does not carry.');
       break;
   }
 }
@@ -94,6 +102,14 @@ async function initKey(
   console.log('');
   console.log('Until it is published, peers cannot fetch it and no voucher you sign');
   console.log('can be verified by anyone else.');
+  console.log('');
+  console.log('FINGERPRINT — read this to peers over a channel the relay does not carry:');
+  console.log(`    ${await accountKeyFingerprint(generated.publicKey)}`);
+  console.log('');
+  console.log('⚠️  A peer who pins your key WITHOUT this is trusting on first use: they');
+  console.log('    get whatever the forge served them. With it, they can check that the');
+  console.log('    key they fetched is the one you meant. Publishing the fingerprint in');
+  console.log('    the same repository proves nothing — it must travel a different way.');
 }
 
 async function vouch(
@@ -205,6 +221,33 @@ async function trust(
   const forge: Forge = 'github';
   const fetched = await fetchAccountKey({ forge, username }, fetch);
 
+  // ⚠️ THE FINGERPRINT CHECK RUNS BEFORE ANYTHING IS PINNED OR ACCEPTED.
+  //
+  // This is what converts trust-on-first-use into VERIFIED-on-first-use. A peer
+  // told the fingerprint over a channel the relay does not carry can check that
+  // the key a forge served is the one the holder meant — and a mismatch must
+  // stop here, before the value is written anywhere, because a pin is the thing
+  // every later verification is measured against.
+  //
+  // ⚠️ IT ALSO GUARDS `--accept-change`, deliberately. Accepting a rotation is
+  // the one moment a substituted key is most likely to be waved through: the
+  // holder said "I rotated", the tool says "a key changed", and the two
+  // corroborate each other without either being checked.
+  const expected = flags.fingerprint as string | undefined;
+  if (expected) {
+    const actual = await accountKeyFingerprint(fetched.publicKey);
+    if (!fingerprintsMatch(expected, actual)) {
+      throw new Error(
+        `The key at ${fetched.url} does NOT match the fingerprint you supplied.\n` +
+          `  you were told: ${expected}\n` +
+          `  the key served: ${actual}\n` +
+          `Nothing was pinned. Either the forge is serving a different key than the ` +
+          `holder published, or the fingerprint was mistyped — and those need opposite ` +
+          `responses, so confirm with the holder rather than re-running.`
+      );
+    }
+  }
+
   if (flags['accept-change'] === true) {
     await acceptPeerAnchorChange(accountId, fetched.publicKey);
     console.log(`Pin for ${accountId} moved to the key now at their anchor.`);
@@ -226,9 +269,13 @@ async function trust(
       console.log('');
       console.log('⚠️  TAKEN ON FAITH. This is the first key seen for this peer, and nothing');
       console.log('    here proves the repository is theirs — only that whoever controls it');
-      console.log('    has been consistent. Confirm the username out of band if it matters;');
-      console.log('    a lookalike account is one glyph away and a key comparison is not.');
-      console.log('    Every key AFTER this one is checked against this pin.');
+      console.log('    has been consistent. Every key AFTER this one is checked against');
+      console.log('    this pin, but THIS one was not checked against anything.');
+      console.log('');
+      console.log('    To check it: ask the holder for their fingerprint over a channel');
+      console.log('    the relay does not carry, then re-run with --fingerprint <fp>.');
+      console.log(`    The key just pinned has fingerprint:`);
+      console.log(`        ${await accountKeyFingerprint(fetched.publicKey)}`);
       break;
 
     case 'unchanged':
@@ -247,4 +294,22 @@ async function trust(
       console.log('    Until then, verification keeps using the pinned key.');
       break;
   }
+}
+
+/** Print this account's own fingerprint, for reading to a peer out of band. */
+async function showFingerprint(): Promise<void> {
+  const keyFile = await loadAccountKeyFile();
+  if (!keyFile) {
+    throw new Error(
+      'No account key found. Run `fam account init-key` first — a fingerprint is a ' +
+        'fingerprint OF a key, and there is none to take one of.'
+    );
+  }
+
+  console.log(`Account: ${keyFile.entity_id}`);
+  console.log(`Fingerprint: ${await accountKeyFingerprint(keyFile.public_key)}`);
+  console.log('');
+  console.log('⚠️  Read this over a channel the relay does not carry — a call, a message');
+  console.log('    on another network, in person. Sending it through FAM proves nothing:');
+  console.log('    a relay that can substitute the key can substitute the fingerprint.');
 }

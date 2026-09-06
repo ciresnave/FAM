@@ -34,10 +34,25 @@ const ACCOUNT = 'chanauth@example.com';
 let serverHandle: ReturnType<typeof startServer>;
 let BASE: string;
 
-// Ephemeral port, for the reason `integration.test.ts` documents: a fixed port
-// collides with the previous run's sockets in TIME_WAIT and takes the whole
-// file's tests with it.
-async function api(path: string, body: unknown): Promise<{ status: number; data: any }> {
+/**
+ * The endpoints this file touches, as a closed set.
+ *
+ * ⚠️ THIS DOES NOT CLEAR CODACY'S `node-ssrf` FINDING ON THE `fetch` BELOW, and
+ * recording that is the point — I was about to make this change believing it
+ * would. Measured against Codacy's API: the rule has 14 instances repo-wide and
+ * SEVEN are sibling test helpers, including two that ALREADY use this exact
+ * union (`encryptionKeyRoute.test.ts:77`, `entityKeyCustody.test.ts:65`). The
+ * check is syntactic and the type is invisible to it.
+ *
+ * It earns its place anyway, for the reason `encryptionKeyRoute.test.ts` gives —
+ * a typo'd path becomes a compile error rather than an expectation failure three
+ * assertions later — and because it makes this PR's disposition CHECKABLE: "the
+ * path cannot be attacker-controlled" stops being something I read off the call
+ * sites once and becomes something the compiler enforces.
+ */
+type Endpoint = '/channels/kick' | '/channels/set-role';
+
+async function api(path: Endpoint, body: unknown): Promise<{ status: number; data: any }> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -51,7 +66,7 @@ function sessionFor(entityId: string): string {
 }
 
 /** Every request needs the caller's own session; role is read from the store. */
-async function as(entityId: string, path: string, body: Record<string, unknown>) {
+async function as(entityId: string, path: Endpoint, body: Record<string, unknown>) {
   return api(path, { entity_id: entityId, session_id: sessionFor(entityId), ...body });
 }
 
@@ -90,6 +105,9 @@ beforeAll(async () => {
   ctx.channels.addMember(channelId, MEMBER_A, 'member');
   ctx.channels.addMember(channelId, MEMBER_B, 'member');
 
+  // Ephemeral port, for the reason `integration.test.ts` documents: a fixed port
+  // collides with the PREVIOUS run's client sockets in TIME_WAIT, the bind
+  // throws inside `beforeAll`, and the whole file's tests vanish from the count.
   serverHandle = startServer({ port: 0, host: TEST_HOST });
   BASE = `http://${TEST_HOST}:${serverHandle.port}`;
 });

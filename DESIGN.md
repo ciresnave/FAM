@@ -1,5 +1,28 @@
 # Federated Agent Messaging (FAM) — Design Document
 
+**Status:** the ORIGINAL design document, and the system it plans is largely
+built — `src/` holds 155 tracked files, 68 of them test files. **Per-phase status lives in
+`ROADMAP.md`, not here.** Three sections of this file are superseded and now say
+so in place: **Phase 5** (→ `DESIGN-FEDERATION.md`), **Testing Strategy**, and
+**Next Steps**. Messaging is scoped in `DESIGN-MESSAGING.md`, the admin access
+model in `DESIGN-ADMIN.md`. The system is **pre-alpha and not deployable**
+(`README.md`).
+
+⚠️ **The phase NUMBERS here are not `ROADMAP.md`'s.** Only Phase 5 names the same
+subject in both. This file's Phase 1 is *Core Account/Entity System*; the
+ROADMAP's Phase 1 is *Permissions & Grants*. Cross-referencing a phase number
+between the two documents gives the wrong section.
+
+> ⚠️ **DISCHARGED 2026-09-06.** This file carried **no status line at all** —
+> alone among the design documents, since `DESIGN-FEDERATION.md`,
+> `DESIGN-MESSAGING.md` and `DESIGN-ADMIN.md` each open with one on line 3 —
+> while `CLAUDE.md:10` and `:15` send readers here, the second of them to
+> *"DESIGN.md Phase 5"* **by name**. A reader arriving from that pointer had no
+> way to tell which parts describe the built system and which are the original
+> plan, and the three documents that supersede parts of this one are **not
+> mentioned anywhere in it** (measured: 0 occurrences; control: `ROADMAP.md`
+> mentions them 6 times). Found by the Claim Auditor.
+
 ## Overview
 
 FAM is an agent-framework-agnostic messaging system for agent-to-agent and agent-to-human communication. It uses a three-layer authentication model (OAuth 2.0 + passkey + key pair) to ensure entity identity is cryptographically bound to specific instances.
@@ -458,12 +481,22 @@ GET /health                       — server status
 - [ ] TPM-backed auto-unlock (macOS)
 - [ ] TPM-backed auto-unlock (Linux major distros)
 
-### Phase 5: Federation
+### Phase 5: Federation — ⚠️ SUPERSEDED by `DESIGN-FEDERATION.md`
 
-- [ ] Server-to-server protocol
-- [ ] Cross-server message routing
-- [ ] Account verification
-- [ ] Entity transfer protocol
+**Read `DESIGN-FEDERATION.md` instead.** It states, in its own words, that it
+replaces *"the four unchecked boxes that were `DESIGN.md`'s entire Phase 5
+specification"*, and it was scoped with CireSnave on 2026-09-02. Its own status
+is *"design, nothing built"*; `ROADMAP.md`'s Phase 5 section carries the current
+position.
+
+> ⚠️ **DISCHARGED 2026-09-06.** This section read as four unchecked boxes:
+> *Server-to-server protocol · Cross-server message routing · Account
+> verification · Entity transfer protocol*. **The supersession was recorded only
+> in the superseding document**, while `CLAUDE.md:15` names *"DESIGN.md Phase 5"*
+> as the place to look — so a reader following the entry point landed on four
+> open boxes with no way to learn that a scoped replacement existed. The retired
+> wording is kept here because deleting it would leave `DESIGN-FEDERATION.md`'s
+> own sentence pointing at nothing.
 
 ---
 
@@ -698,7 +731,22 @@ fam/
 └── tsconfig.json           # Keep
 ```
 
-### Testing Strategy
+### Testing Strategy — ⚠️ SUPERSEDED: the plan, not the built layout
+
+**None of the twelve paths below exist.** Measured 2026-09-06 at `58ce6196`:
+**68 test files do exist**, under `__tests__/` directories beside the code they
+cover — `src/crypto/__tests__/keys.test.ts`, not `src/crypto/keys.test.ts`. The
+plan put tests next to their subject; the build put them in a sibling directory,
+so **every path here is wrong by one directory rather than missing work.**
+
+Run them with **`bun run test`**, not bare `bun test` — see `CLAUDE.md`, which
+carries the reason. Structural conventions the suite actually enforces (per-test
+timeout floors, non-vacuity guards) live in `src/__tests__/`.
+
+> ⚠️ **DISCHARGED 2026-09-06.** This section listed twelve `*.test.ts` paths as
+> the testing strategy, and a reader could not tell that it described a layout
+> that was never adopted. Kept rather than rewritten: it is the record of what
+> was planned, and the built layout is `ROADMAP.md`'s and the suite's to state.
 
 **Unit tests (bun test):**
 - `src/crypto/keys.test.ts` — Key generation, sign/verify
@@ -720,7 +768,19 @@ fam/
 
 ---
 
-## Next Steps
+## Next Steps — ⚠️ SUPERSEDED: this list was executed
+
+**Do not work from this list.** Measured 2026-09-06 at `58ce6196`: `src/` exists
+with **155 tracked files**, and `ROADMAP.md` records Phase 3 and Phases 7.1–7.4 as DONE.
+**`ROADMAP.md` is the live queue**; this is the original ordering, kept as the
+record of what was planned first.
+
+> ⚠️ **DISCHARGED 2026-09-06.** Step 1 read *"Create `src/` directory
+> structure"* against a `src/` that already held 155 tracked files, and the list sat
+> under no status line in a document `CLAUDE.md` sends readers to. **A completed
+> plan presented as pending invites someone to build a second answer beside the
+> first** — which is this file's own argument, made one section earlier about its
+> Open Questions and not applied here.
 
 1. Create `src/` directory structure (see Directory Structure above)
 2. Implement Phase 0: Foundation (crypto + auth)

@@ -12,14 +12,28 @@ architecture and `ROADMAP.md` for phased status — ROADMAP.md is the source of
 truth for what is done and what is not.
 
 **Pre-alpha.** Runs end to end locally via `bun run bootstrap <email>`, but is
-not ready to deploy. **Federation is unbuilt** — see DESIGN.md Phase 5, which is
-the one phase with no ROADMAP section.
+not ready to deploy. **Federation is unbuilt** — see `DESIGN-FEDERATION.md` for
+the scope and `ROADMAP.md` Phase 5 for the position.
 
 This line previously also named key rotation and per-recipient channel delivery
 as unbuilt. Both shipped and ROADMAP has carried them as LOCKED for some time
 (`src/scripts/rotate-key.ts` and the keyring in `src/crypto/message-encryption.ts`;
 `message_deliveries` and migration 7). A stale "not built yet" is worse than a
 stale "done": it invites someone to build a second one.
+
+⚠️ **And a third item in the same sentence survived that edit.** It read *"see
+DESIGN.md Phase 5, **which is the one phase with no ROADMAP section**"* — while
+`ROADMAP.md:1185` carries a Phase 5 section and says, in its own text, *"for a
+long time never given a ROADMAP section … **that is no longer true and this
+heading has been corrected rather than left to age**."* Measured 2026-09-06 at
+`58ce6196`: **all five of `DESIGN.md`'s phases now have a `### Phase N` section
+in ROADMAP** (control: 9 phase sections in total). **ROADMAP corrected itself and
+nothing carried the correction back up here** — four lines under the sentence
+naming ROADMAP as the source of truth. The pointer now names the two documents
+that hold the answer instead of asserting a fact about one of them. *Correcting
+something makes its neighbour less likely to be checked, because the line reads
+as handled; here the neighbour was in the same sentence.* Found by the Claim
+Auditor.
 
 `bun run bootstrap` writes to the database directly and is deliberately NOT an
 HTTP route — an endpoint that mints account credentials is an authentication

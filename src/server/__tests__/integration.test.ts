@@ -1304,65 +1304,85 @@ describe('FAM Server Integration', () => {
     //                                   by design, and a mislabel in THAT
     //                                   direction hides a broken sign-in.
     //
-    // Measured before writing it: all 26 already behave. This closes a gap in
-    // the DEVICE, not in the server — nothing here was broken, and nothing
+    // Measured before writing them: all 26 already behave. This closes a gap
+    // in the DEVICE, not in the server — nothing here was broken, and nothing
     // would have said so if it became broken.
+    //
+    // Two tests rather than one, because they assert two DIFFERENT claims and
+    // a single test reports either failure under one name. (Codacy also read
+    // the combined version at complexity 9 against a limit of 8, which was a
+    // fair reading of a loop carrying two branches and two verdicts.)
     // ------------------------------------------------------------------
 
-    test('⚠️ every EXEMPTED route is asserted too, or the classification is just a comment', async () => {
-      const routes = await registeredRoutes();
-
-      const credentialled: Array<{ route: string; status: number }> = [];
-      const reachable: Array<{ route: string; status: number }> = [];
-      let checked = 0;
-
-      for (const [pattern, route] of routes) {
-        // Parameterised patterns cannot be called by their pattern text; the
-        // two that exist are OAuth redirects and are covered as PUBLIC by
-        // inspection rather than by a request to a literal ":provider".
-        if (pattern.includes(':')) continue;
-
-        if (ACCOUNT_SCOPED.has(pattern) || ADMIN_SESSION.has(pattern)) {
-          checked++;
-          const status = await callUnauthenticated(pattern, route.method);
-          // 401 EXACTLY, for the reason the test above gives: any-4xx answers
-          // "did this fail?" when the question is "were credentials required?".
-          if (status !== 401) credentialled.push({ route: pattern, status });
-        } else if (PUBLIC.has(pattern) || ESTABLISHING.has(pattern)) {
-          checked++;
-          const status = await callUnauthenticated(pattern, route.method);
-          // Not asserting 200: /entities/connect answers 400 to an empty body,
-          // which is correct and is not a credential refusal. The claim being
-          // tested is only that these are NOT gated — mislabelling a gated
-          // route as PUBLIC would hide it here.
-          if (status === 401) reachable.push({ route: pattern, status });
-        }
+    /**
+     * Every non-parameterised registered pattern in `set`, with its method.
+     *
+     * Parameterised patterns cannot be called by their pattern text; the two
+     * that exist are OAuth redirects, classified PUBLIC by inspection rather
+     * than by a request to a literal ":provider".
+     */
+    async function classified(set: Set<string>): Promise<Array<[string, string]>> {
+      const out: Array<[string, string]> = [];
+      for (const [pattern, route] of await registeredRoutes()) {
+        if (!pattern.includes(':') && set.has(pattern)) out.push([pattern, route.method]);
       }
+      return out;
+    }
 
-      expect(credentialled).toEqual([]);
-      expect(reachable).toEqual([]);
+    /**
+     * ⚠️ A VACUITY GUARD ON THE LOOP, NOT ON THE SETS — and the difference was
+     * measured rather than assumed.
+     *
+     * I first wrote this as "so the exemptions cannot silently empty" and
+     * tested it: removing three entries from ACCOUNT_SCOPED left 69 pass, 0
+     * fail. The guard did not fire and SHOULD NOT HAVE. Deleting an entry does
+     * not create a hole — the route falls through to `enforced` in the test
+     * above and is asserted 401, which is STRICTER. A stale entry matching no
+     * route is harmless for the same reason.
+     *
+     * The dangerous edit is the opposite one: ADDING a real route to an exempt
+     * set, which silences every assertion about it. That is what the two tests
+     * below catch, and it is the whole point of them.
+     *
+     * So this guards only the case where the loop matches NOTHING — a broken
+     * `registeredRoutes()`, or a route map that came back empty — because then
+     * the failure array is trivially `[]` and the test passes having examined
+     * nothing. Floors are deliberately far below today's counts for the reason
+     * `gates.ts` gives: one set near the current value reddens on a legitimate
+     * deletion and teaches people to raise it.
+     */
+    function expectExamined(routes: Array<[string, string]>, floor: number): void {
+      expect(routes.length).toBeGreaterThan(floor);
+    }
 
-      // A vacuity guard on the LOOP, not on the sets — and the difference was
-      // measured rather than assumed.
-      //
-      // ⚠️ I FIRST WROTE THIS AS "so the exemptions cannot silently empty" AND
-      // TESTED IT: removing three entries from ACCOUNT_SCOPED left 69 pass, 0
-      // fail. The guard did not fire and SHOULD NOT HAVE. Deleting an entry
-      // does not create a hole — the route falls through to `enforced` in the
-      // test above and is asserted 401, which is STRICTER. A stale entry that
-      // matches no route is harmless for the same reason.
-      //
-      // The dangerous edit is the opposite one: ADDING a real route to an
-      // exempt set, which silences every assertion about it. That is what the
-      // two expectations above catch, and it is the whole point of this test.
-      //
-      // So this count guards only the case where the loop matches NOTHING — a
-      // broken `registeredRoutes()`, or a route map that came back empty —
-      // because then both arrays are trivially `[]` and the test passes having
-      // examined nothing. Deliberately far below the current 26 for the reason
-      // `gates.ts` gives about floors: one set near today's value reddens on a
-      // legitimate deletion and teaches people to raise it.
-      expect(checked).toBeGreaterThan(20);
+    test('⚠️ a route exempted as CREDENTIALLED still refuses without credentials', async () => {
+      const routes = [...(await classified(ACCOUNT_SCOPED)), ...(await classified(ADMIN_SESSION))];
+      expectExamined(routes, 15);
+
+      // 401 EXACTLY, for the reason the test above gives: any-4xx answers "did
+      // this fail?" when the question is "were credentials required?".
+      const wrong: Array<{ route: string; status: number }> = [];
+      for (const [pattern, method] of routes) {
+        const status = await callUnauthenticated(pattern, method);
+        if (status !== 401) wrong.push({ route: pattern, status });
+      }
+      expect(wrong).toEqual([]);
+    });
+
+    test('⚠️ a route exempted as PUBLIC is actually reachable, or the label hides a gate', async () => {
+      const routes = [...(await classified(PUBLIC)), ...(await classified(ESTABLISHING))];
+      expectExamined(routes, 3);
+
+      // Not asserting 200: /entities/connect answers 400 to an empty body,
+      // which is correct and is not a credential refusal. The claim tested here
+      // is only that these are NOT gated — mislabelling a gated route as PUBLIC
+      // would hide it, and a broken sign-in screen looks like a policy choice.
+      const gated: Array<{ route: string; status: number }> = [];
+      for (const [pattern, method] of routes) {
+        const status = await callUnauthenticated(pattern, method);
+        if (status === 401) gated.push({ route: pattern, status });
+      }
+      expect(gated).toEqual([]);
     });
   });
 

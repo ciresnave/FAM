@@ -38,8 +38,26 @@ import { Glob } from 'bun';
  * NUMBER. `#\d+` is a pattern, so this file does not match itself and needs no
  * exclusion. An exclusion would be a hole in the check shaped exactly like the
  * thing being checked, in the one file guaranteed to discuss the pattern.
+ *
+ * ⚠️ The separator is `[\s:]*` and NOT `\s*:?\s*`, which was the first draft.
+ * Two `\s*` either side of an optional character are AMBIGUOUS — a run of
+ * whitespace can be split between them in as many ways as it is long, so the
+ * matcher degrades polynomially on a long line that starts to match and then
+ * fails. A single character class has one way to consume each character.
+ *
+ * It is also very slightly more permissive — a keyword followed by repeated or
+ * mixed colons and spaces now matches, where the earlier form allowed at most
+ * one colon. That is the right direction for this guard: a false positive
+ * costs a rephrase, and a false negative already auto-closed a live issue once.
+ *
+ * ⚠️ AND THE EXAMPLE THAT BELONGS HERE IS DELIBERATELY DESCRIBED RATHER THAN
+ * WRITTEN. The first draft of this paragraph spelled the newly-matching string
+ * out, which made this comment the FOURTH instance of the pattern it forbids —
+ * caught by this test, on its first run, before the change was pushed. Every
+ * earlier instance took a sweep or a self-check to find; this one the guard
+ * found by itself, which is the whole argument for it existing.
  */
-const ADJACENT = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b\s*:?\s*#\d+/i;
+const ADJACENT = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b[\s:]*#\d+/i;
 
 /**
  * The surface a commit message might quote: our own source and our own prose.

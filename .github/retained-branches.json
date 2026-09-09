@@ -1,0 +1,54 @@
+{
+  "$comment": [
+    "Branches on this repository that MUST NOT be deleted, in a form a sweep can read.",
+    "",
+    "WHY THIS FILE EXISTS: a sweep that deletes 'merged branches with no open PR' takes",
+    "all three of these. The CATEGORY they fall in is 'merged, no open PR'. The PROPERTY",
+    "that matters is 'has no other home', and those two come apart on exactly these",
+    "branches. Only a reader who has read CLAUDE.md knows which -- so the exception was",
+    "prose, and prose is not readable by the thing that would violate it.",
+    "",
+    "WHAT THIS FILE DOES NOT DO: it does not protect anything by itself. A branch sweep",
+    "that never reads it is unaffected by it, and a file nobody reads is a label with no",
+    "consequence. The protection has two halves and only one of them lives here:",
+    "  1. this data, and a test asserting it agrees with CLAUDE.md   (this repository)",
+    "  2. every branch sweep reading it before deleting               (the sweep's owner)",
+    "Half two is not implemented here and cannot be. Saying so is the point: an exception",
+    "documented on the protected side and enforced on the acting side is not an exception,",
+    "it is a hope with a filename."
+  ],
+  "retained": [
+    {
+      "branch": "fix/preserve-undelivered-messages",
+      "reason": "The claude-peers broker code currently running.",
+      "has_other_home": false,
+      "archived_from": "ciresnave/claude-peers-mcp",
+      "source_repo_deleted": "2026-08-20"
+    },
+    {
+      "branch": "fix/cross-platform-support",
+      "reason": "The rollback target for the running broker. Contains the destroys-undelivered-mail bug itself, kept deliberately because a rollback target must be what it actually was.",
+      "has_other_home": false,
+      "archived_from": "ciresnave/claude-peers-mcp",
+      "source_repo_deleted": "2026-08-20"
+    },
+    {
+      "branch": "fix/retention-and-indexes",
+      "reason": "Archived broker work, not reachable from FAM's main.",
+      "has_other_home": false,
+      "archived_from": "ciresnave/claude-peers-mcp",
+      "source_repo_deleted": "2026-08-20"
+    }
+  ],
+  "why_a_diff_cannot_decide_this": [
+    "All three fork from 640183f and every one is strictly superseded: the only lines they",
+    "hold that main lacks are the ORIGINALS of code main has since replaced. So a tree diff",
+    "reports them as containing nothing new, which is what being superseded looks like --",
+    "and is indistinguishable from debris.",
+    "",
+    "They were never pull requests, so a sweep that subtracts merged-PR heads surfaces all",
+    "three every time. That is a true observation with a settled answer, recorded here so",
+    "the answer does not have to be re-derived, and so it can be re-derived by a program",
+    "rather than by a person who happens to have read the right paragraph."
+  ]
+}

@@ -134,6 +134,17 @@ export function entityRoutes(
         const claim = claimingInstance
           ? claimIdentity(ctx, entity_id, claimingInstance)
           : undefined;
+
+        // ⚠️ CLOSE THE SUPERSEDED SOCKETS. Marking the session rows ends the
+        // REQUEST path; a WebSocket is validated once at connect and then lives
+        // in the manager's in-memory maps with nothing revalidating it.
+        // Measured before this call existed: an evicted instance received a
+        // message sent AFTER its eviction — dead to the server, live on the
+        // push channel, which is the one-way break this project has now seen in
+        // two systems.
+        if (claim && claim.supersededSessionIds.length > 0) {
+          wsManager.disconnectSuperseded(claim.supersededSessionIds);
+        }
         
         // Update entity status
         ctx.entities.updateStatus(entity_id, 'online');

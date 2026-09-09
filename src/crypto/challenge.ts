@@ -46,6 +46,13 @@ export function generateChallenge(): { nonce: string } {
 
 /**
  * Store a challenge in the database.
+ *
+ * ⚠️ MULTIPLE CHALLENGES MAY BE OUTSTANDING FOR ONE ENTITY, DELIBERATELY.
+ * The table was keyed by `entity_id` alone until migration 20, so a second
+ * `connect` REPLACED the first's nonce and both parties then failed to
+ * authenticate — one told "Invalid signature" over a signature that was valid,
+ * the other told "Challenge has expired" about a challenge seconds old. Two
+ * instances of one entity are a supported situation, not an error.
  */
 export function storeChallenge(db: Database, entityId: string, nonce: string): void {
   const stmt = db.prepare(`
@@ -57,27 +64,47 @@ export function storeChallenge(db: Database, entityId: string, nonce: string): v
 }
 
 /**
- * Get and consume a challenge (single use, atomic).
- * Returns the challenge if valid, undefined otherwise.
- * Uses a transaction to prevent race conditions between concurrent authentications.
+ * Get and consume ONE challenge — the one issued to `entityId` carrying
+ * `nonce`. Single use, atomic. Returns undefined if there is no such live
+ * challenge.
+ *
+ * ⚠️ THE NONCE IS PART OF THE LOOKUP, NOT ONLY OF THE VERIFICATION. Selecting
+ * by `entity_id` alone consumed whichever challenge happened to be stored,
+ * which after migration 20 could be a DIFFERENT INSTANCE'S — turning a second
+ * instance's arrival into the first instance's authentication failure.
+ *
+ * ⚠️ AND BOTH COLUMNS MUST MATCH. Looking up by nonce alone would let a
+ * holder of any valid nonce select the challenge it was issued to and
+ * authenticate as its owner, because the route verifies against the key of the
+ * entity NAMED IN THE REQUEST. The pair is the identity of a challenge.
+ *
+ * The transaction was here before and was never the problem: it made access to
+ * one row atomic, correctly. The defect was that there could only ever BE one
+ * row — a guard right about its own invariant, built on the wrong model.
  */
-export function consumeChallenge(db: Database, entityId: string): Challenge | undefined {
+export function consumeChallenge(
+  db: Database,
+  entityId: string,
+  nonce: string
+): Challenge | undefined {
   // Use a transaction for atomicity: read + delete in one go
   const row = db.transaction(() => {
     const stmt = db.prepare(`
       SELECT * FROM challenges
       WHERE entity_id = ?
+      AND nonce = ?
       AND created_at > datetime('now', '-' || ? || ' seconds')
     `);
     
-    const row = stmt.get(entityId, NONCE_EXPIRY_SECONDS) as Challenge | undefined;
+    const row = stmt.get(entityId, nonce, NONCE_EXPIRY_SECONDS) as Challenge | undefined;
     
     if (row) {
-      // Delete immediately (single use) — within same transaction
+      // Delete immediately (single use) — within same transaction, and scoped
+      // to this challenge so a sibling instance's live challenge survives.
       const deleteStmt = db.prepare(`
-        DELETE FROM challenges WHERE entity_id = ?
+        DELETE FROM challenges WHERE entity_id = ? AND nonce = ?
       `);
-      deleteStmt.run(entityId);
+      deleteStmt.run(entityId, nonce);
     }
     
     return row;

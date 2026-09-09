@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 19;
+export const CURRENT_SCHEMA_VERSION = 20;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -806,6 +806,72 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
       pending_public_key TEXT,
       pending_seen_url TEXT
     )`,
+  ],
+
+  20: [
+    // ⚠️ ONE OUTSTANDING CHALLENGE PER ENTITY MADE TWO INSTANCES LOCK EACH
+    // OTHER OUT, AND TOLD BOTH OF THEM SOMETHING FALSE.
+    //
+    // `challenges.entity_id` was a PRIMARY KEY written with INSERT OR REPLACE,
+    // and `/entities/authenticate` CONSUMES the row. Measured at `43e2498f`:
+    //
+    //     connect A                     200, nonce A
+    //     connect B                     200, nonce B   (replaced A's row)
+    //     authenticate A (correct sig)  401  "Invalid signature"
+    //     authenticate B (correct sig)  401  "Challenge has expired"
+    //     CONTROL: solo connect+auth    200
+    //
+    // BOTH failed. A's signature was valid over the nonce A was issued; B's
+    // challenge was seconds old and was consumed by A, not expired.
+    //
+    // ⚠️ AND IT WAS NOT A RACE — THE TWO CONNECTS WERE SEQUENTIAL. The window
+    // is the whole connect->authenticate exchange, so an agent restarting while
+    // a previous instance still holds a session could lock itself out. The MCP
+    // client classifies 401 as PERMANENT, so it does not ride it out: it stops
+    // and reports a signature problem.
+    //
+    // The key is (entity_id, nonce) rather than nonce alone. A nonce is 32
+    // random bytes and a global collision is not a practical worry, but the
+    // PAIR is what the lookup must match — see `consumeChallenge`, which now
+    // requires both so that holding a valid nonce issued to someone else does
+    // not select their challenge.
+    //
+    // ⚠️ THIS REMOVES THE ONLY THING IN FAM THAT REACTED TO DUPLICATE
+    // INSTANCES AT ALL. That is correct — the collision was never a detector,
+    // it was a denial of service that happened to correlate — but it means the
+    // deliberate mechanism in DESIGN-INSTANCE-IDENTITY.md is now the only
+    // planned answer, and landing this alone trades a misleading signal for no
+    // signal. Recorded so the trade is visible rather than discovered.
+    (db: Database) => {
+      // Repeatable: skip if the table already carries the composite key.
+      const cols = db.query('PRAGMA table_info(challenges)').all() as Array<{
+        name: string;
+        pk: number;
+      }>;
+      const nonceIsKey = cols.some(c => c.name === 'nonce' && c.pk > 0);
+      if (nonceIsKey) return;
+
+      db.run(`CREATE TABLE IF NOT EXISTS challenges_v20 (
+        entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        nonce TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (entity_id, nonce)
+      )`);
+
+      // Existing rows carry forward. There is at most one per entity by
+      // construction, so no conflict is possible — and INSERT OR IGNORE keeps
+      // the step repeatable if it is interrupted after the copy.
+      db.run(
+        `INSERT OR IGNORE INTO challenges_v20 (entity_id, nonce, created_at)
+         SELECT entity_id, nonce, created_at FROM challenges`
+      );
+
+      db.run('DROP TABLE challenges');
+      db.run('ALTER TABLE challenges_v20 RENAME TO challenges');
+
+      // The sweep and the FK cascade both filter by entity.
+      db.run('CREATE INDEX IF NOT EXISTS idx_challenges_entity ON challenges(entity_id)');
+    },
   ],
 };
 

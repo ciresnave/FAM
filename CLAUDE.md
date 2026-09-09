@@ -97,7 +97,19 @@ They exist because the repository holding them was deleted, so they have no
 other home. A sweep that subtracts merged-PR heads will surface all three every
 time: they were never PRs, and a tree diff cannot tell "main moved on" from
 "never merged". That is a true observation with a settled answer, recorded here
-so the answer does not have to be re-derived. Dead remotes pointing at the deleted repo have
+so the answer does not have to be re-derived.
+
+⚠️ **And it is now re-derivable by a PROGRAM, not only by whoever read this
+paragraph.** `.github/retained-branches.json` carries the same three branches in
+machine-readable form, and `src/__tests__/retainedBranches.test.ts` fails if the
+two disagree in either direction. **The category a sweep matches on is "merged,
+no open PR"; the property that matters is "has no other home"; and those come
+apart on exactly these three.** A sweep that reads the datafile can tell them
+apart. **One that does not, cannot — and the file protects nothing by itself.**
+An exception documented on the protected side and enforced on the acting side is
+a hope with a filename, so the second half belongs to whoever owns the sweep.
+
+Dead remotes pointing at the deleted repo have
 been removed from both checkouts — every configured remote now resolves.
 
 ## Architecture — FAM (`src/`)

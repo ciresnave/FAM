@@ -50,7 +50,23 @@ let priv: string;
 let otherPub: string;
 let otherPriv: string;
 
-async function post(path: string, body: unknown): Promise<{ status: number; data: any }> {
+/**
+ * The two endpoints this file touches, as a closed set.
+ *
+ * ⚠️ THIS DOES NOT CLEAR CODACY'S `node-ssrf` FINDING ON THE `fetch` BELOW,
+ * and saying so is the point. Measured on #43: the rule has instances repo-wide
+ * on sibling test helpers that ALREADY use this exact form, so the check is
+ * syntactic and the type is invisible to it.
+ *
+ * It earns its place anyway. A typo'd path becomes a compile error rather than
+ * an expectation failure three assertions later — and it makes the PR's
+ * disposition CHECKABLE: "only two literal paths reach this call" stops being
+ * something I read off the call sites once and becomes something the compiler
+ * enforces as call sites are added.
+ */
+type Endpoint = '/entities/connect' | '/entities/authenticate';
+
+async function post(path: Endpoint, body: unknown): Promise<{ status: number; data: any }> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

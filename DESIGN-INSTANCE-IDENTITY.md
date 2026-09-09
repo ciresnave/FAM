@@ -140,6 +140,41 @@ separate Claude Code processes started from the same credentials, which mint
 different ids; a fork is a different failure with a different fix, and pretending
 this covers it would be the more dangerous outcome.
 
+### ⚠️ 1a. And "never persisted" is the load-bearing half, because this machine
+has already produced identity-by-inheritance
+
+A third duplication mechanism exists that **neither the instance id nor the
+generation counter can detect**, and it is worth naming because the obvious
+implementation walks straight into it.
+
+**Verified locally at `43e2498f`:** `.remember/` is listed in `.gitignore`
+(line 49), so it is **per-checkout, not per-session** — one directory shared by
+every session whose working directory is that checkout, read into context by the
+resume hook. FAM's copy holds lines like *"## 05:53 | test/channel-authorization
+— Channel auth: member-kick priv-esc found via mutation"*: state written in a
+voice that reads as **the current session's own**.
+
+**FAM has one lane, so nothing collides here. That is the only reason.**
+
+*Two lanes on this machine have reported the collision itself — a resume hook
+telling two different sessions, in the first person, that each was the same named
+role. Those are peer reports and are recorded as such; the mechanism they
+describe is the one verified above.*
+
+⚠️ **THE GENERATION COUNTER IS BLIND TO THIS, AND NOT BY OVERSIGHT.** Both
+parties hold **legitimate, distinct** registry identities. There is no contested
+claim, no second holder, nothing to fence. **The registry is right and the
+BELIEF is wrong** — so a mechanism that arbitrates claims has nothing to
+arbitrate.
+
+**Which is exactly why the instance id must be minted in memory and written
+nowhere.** An id persisted to a project-scoped file is inherited by the next
+sibling that reads it, and **an inherited instance id is worse than none: it
+makes two processes indistinguishable BY THE MECHANISM BUILT TO DISTINGUISH
+THEM.** The requirement is not "avoid the disk" as hygiene — it is that the
+storage must be **structurally exclusive to one session**, so a sibling *cannot*
+read it rather than merely *does not*.
+
 ### 2. A generation counter on the entity — a fencing token
 
 A new migration (the next is **20**; `CURRENT_SCHEMA_VERSION` is 19) adds a

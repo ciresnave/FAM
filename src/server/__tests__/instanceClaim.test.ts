@@ -37,6 +37,10 @@ const TEST_HOST = '127.0.0.1';
 const ACCOUNT = 'instanceclaim@example.com';
 const AGENT = `agent@${ACCOUNT}`;
 const OTHER = `other@${ACCOUNT}`;
+// ⚠️ A DEDICATED ENTITY FOR THE LIVENESS COUNTS, because every claim in this
+// file supersedes the previous holder's sessions — so a count taken on a shared
+// entity measures whatever the earlier tests left behind, not what this test did.
+const COUNTED = `counted@${ACCOUNT}`;
 
 let serverHandle: ReturnType<typeof startServer>;
 let BASE: string;
@@ -100,6 +104,7 @@ beforeAll(async () => {
   );
   insert.run(AGENT, ACCOUNT, pub);
   insert.run(OTHER, ACCOUNT, otherPub);
+  insert.run(COUNTED, ACCOUNT, pub); // same key as AGENT; only the identity differs
 
   // Ephemeral port, for the reason `integration.test.ts` documents.
   serverHandle = startServer({ port: 0, host: TEST_HOST });
@@ -230,6 +235,59 @@ describe('⚠️ opting out is the default, and it is how the human question sta
     await authenticate(AGENT, priv, pub, 'instance-eta');
 
     expect(await sessionWorks(AGENT, anonymous.data.session_id)).toBe(true);
+  });
+});
+
+describe('⚠️ a superseded session is not LIVE anywhere, not just at getById', () => {
+  // ⚠️ MARKING INSTEAD OF DELETING LEAVES THE ROW BEHIND, AND EVERY QUERY THAT
+  // COUNTS SESSIONS HAD TO LEARN ABOUT IT.
+  //
+  // Only `getById` filtered at first. The liveness queries — count-for-entity,
+  // active, active-count — did not, so a superseded row still read as a live
+  // session. `/entities/disconnect` uses the count to decide "was that the last
+  // one?", so an entity whose last REAL session left would have stayed marked
+  // ONLINE, held there by a session that had been evicted.
+  //
+  // That is the same failure this whole mechanism exists to end — a dead holder
+  // that still looks present — reintroduced one layer down by the fix for it.
+  // Found by asking what the change touched rather than by a failing test.
+
+  test('the entity session count excludes a superseded session', async () => {
+    const ctx = getDatabaseContext();
+    expect(ctx.sessions.getCountByEntityId(COUNTED)).toBe(0); // clean start
+
+    const older = await authenticate(COUNTED, priv, pub, 'instance-pi');
+    expect(ctx.sessions.getCountByEntityId(COUNTED)).toBe(1);
+
+    await authenticate(COUNTED, priv, pub, 'instance-rho');
+
+    // One session added, one superseded — so the LIVE count is still 1, not 2.
+    // Counting the evicted row is what would keep `/entities/disconnect` from
+    // ever marking this entity offline.
+    expect(ctx.sessions.getCountByEntityId(COUNTED)).toBe(1);
+    expect(await sessionWorks(COUNTED, older.data.session_id)).toBe(false);
+  });
+
+  test('a superseded session does not keep an entity looking active', async () => {
+    const ctx = getDatabaseContext();
+    const live = ctx.sessions.getByEntityId(COUNTED);
+    expect(live).not.toBeNull();
+
+    // End the only LIVE session, leaving just the superseded one behind.
+    ctx.sessions.delete(live!.id);
+
+    // ⚠️ Without the filter this reads TRUE, held up by an evicted session —
+    // a dead holder that still looks present, which is the exact failure this
+    // whole mechanism exists to end.
+    expect(ctx.sessions.isActive(COUNTED)).toBe(false);
+  });
+
+  test('control: a LIVE session does keep the entity active', async () => {
+    // Without this, both assertions above pass against queries that report
+    // nothing as active, ever.
+    const ctx = getDatabaseContext();
+    await authenticate(COUNTED, priv, pub, 'instance-upsilon');
+    expect(ctx.sessions.isActive(COUNTED)).toBe(true);
   });
 });
 

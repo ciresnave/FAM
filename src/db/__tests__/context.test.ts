@@ -122,6 +122,54 @@ describe('collisions are detected by equality, not by understanding', () => {
   });
 });
 
+describe('⚠️ the key and the value are joined WITHOUT ambiguity', () => {
+  // ⚠️ THE PROPERTY THE SEPARATOR EXISTS FOR, AND IT WAS UNTESTED.
+  //
+  // Collisions are found by joining key and value into one Map key. If that
+  // join is ambiguous, two entities that share NOTHING are reported as sharing
+  // a value — and the report names a pair neither of them has.
+  //
+  // A FALSE collision is worse than a missed one here: this surface exists to
+  // tell an operator that two agents are stepping on each other, and a
+  // fabricated one sends them hunting a conflict that does not exist.
+  //
+  // ⚠️ MY FIRST VERSION OF THIS FAILED FOR AN UNRELATED REASON — it used
+  // un-namespaced keys, which `updateContext` refuses, so both tests threw. The
+  // CONTROL is what said so: a property test failing alone reads as "the
+  // property is broken", and a property test failing BESIDE its control reads
+  // as "the setup is wrong". Only the second is true here.
+
+  test('two entities whose key+value CONCATENATE identically do not collide', () => {
+    // Guards a join with NO separator at all: 'mcp.ab' + 'c' and 'mcp.a' + 'bc'
+    // are both "mcp.abc".
+    ctx.entities.updateContext(A, { 'mcp.ab': 'c' });
+    ctx.entities.updateContext(B, { 'mcp.a': 'bc' });
+
+    expect(ctx.entities.findContextCollisions(ACCOUNT)).toEqual([]);
+  });
+
+  test('⚠️ nor do they when the separator itself appears in the data', () => {
+    // Guards a join with a PRINTABLE separator: under ':' both of these are
+    // "mcp.a:b:c". This is why the separator cannot be a character the data may
+    // contain, and it is the case a delimiter chosen for readability fails.
+    ctx.entities.updateContext(A, { 'mcp.a': 'b:c' });
+    ctx.entities.updateContext(B, { 'mcp.a:b': 'c' });
+
+    expect(ctx.entities.findContextCollisions(ACCOUNT)).toEqual([]);
+  });
+
+  test('control: an ACTUAL shared pair is still reported', () => {
+    // Without this, both tests above pass against a function that never reports
+    // anything — satisfying every "not a collision" assertion in this file
+    // while making the feature useless.
+    ctx.entities.updateContext(A, { 'mcp.ab': 'c' });
+    ctx.entities.updateContext(B, { 'mcp.ab': 'c' });
+
+    const found = ctx.entities.findContextCollisions(ACCOUNT);
+    expect(found.some(c => c.key === 'mcp.ab' && c.value === 'c')).toBe(true);
+  });
+});
+
 describe('context does not cross an account boundary', () => {
   test('a foreign entity sharing a value is NOT reported', () => {
     ctx.entities.updateContext(A, { 'mcp.cwd': 'C:/Projects/crossing' });

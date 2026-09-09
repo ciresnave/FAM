@@ -395,7 +395,23 @@ export class EntityRepository {
       }
       for (const [key, value] of Object.entries(bag)) {
         if (typeof value !== 'string' || value === '') continue;
-        const composite = `${key} ${value}`;
+        // The join must be INJECTIVE, or two entities that share nothing are
+        // reported as sharing a value and the report names a pair neither has.
+        // A false collision is worse than a missed one on a surface whose job
+        // is to tell an operator that two agents are stepping on each other.
+        //
+        // JSON rather than a delimiter: any single character can appear in a
+        // value, so `a` + `b:c` and `a:b` + `c` collide under ':' exactly as
+        // they do under no separator at all.
+        //
+        // ⚠️ AND IT REPLACES A NUL BYTE, WHICH WAS CORRECT AND HAD A COST
+        // NOBODY HAD PRICED: a single NUL byte in a source file makes `grep -r` report
+        // "Binary file matches" instead of the matching lines, so every text
+        // census over src/ silently skipped this file's contents. In a
+        // codebase that audits itself by census, an instrument that excludes
+        // part of its domain without saying so is the expensive kind of
+        // correct.
+        const composite = JSON.stringify([key, value]);
         const entry = seen.get(composite) ?? { key, value, entity_ids: [] };
         entry.entity_ids.push(row.id);
         seen.set(composite, entry);

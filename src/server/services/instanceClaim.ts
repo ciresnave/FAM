@@ -83,6 +83,29 @@ export function claimIdentity(
       )
       .run(entityId, generation, instanceId);
 
+    // ⚠️ NO FLAP PROTECTION HERE, AND THIS IS WHERE IT WOULD GO.
+    //
+    // Two processes that both keep reconnecting will evict each other in turn.
+    // The remedy is a minimum hold time before a fresh claim may supersede, and
+    // it is NOT IMPLEMENTED — deliberately, with a condition rather than a
+    // shrug.
+    //
+    // THE FLOOR MUST BE MEASURED FROM AN OBSERVED RESTART-TO-RECONNECT INTERVAL,
+    // AND FAM HAS NO POPULATION TO MEASURE: no deployment, no fleet, no restart
+    // history. A constant chosen now would look principled, be arbitrary, and
+    // have nothing recording which.
+    //
+    // ⚠️ AND DO NOT SUBSTITUTE A PROXY. The claude-peers broker's registration
+    // behaviour is a different system with a different restart profile, and a
+    // proxy stated as a proxy still becomes the number people quote. A missing
+    // guard with a stated reason is auditable; a guard tuned to a foreign
+    // workload is not.
+    //
+    // TRIGGER: set the floor when FAM has real restart data. Tracked as #54, and
+    // repeated HERE because the pull request that implements it will close #54 and
+    // take the condition with it — a warning about a fix does not survive in the
+    // artifact that fix closes.
+
     // ⚠️ AFTER the claim is written, so a crash between the two leaves the
     // claim ahead of the evictions rather than behind them. An un-evicted old
     // session is a visible inconsistency the next claim repairs; an eviction

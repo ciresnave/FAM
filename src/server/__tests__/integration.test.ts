@@ -1152,6 +1152,64 @@ describe('FAM Server Integration', () => {
       expect(status).toBe(201);
     });
 
+    /**
+     * The route map the server actually serves, built the way the server
+     * builds it. Shared by the two tests below so the classification and the
+     * surface it classifies cannot drift apart — a second copy of either would
+     * agree today and be a second answer waiting to disagree.
+     */
+    async function registeredRoutes() {
+      const { setupRoutes } = await import('../routes');
+      const { WebSocketManager } = await import('../websocket');
+      const { MessageSendService } = await import('../services/messageSend');
+      const { PermissionChecker } = await import('../services/permissionChecker');
+
+      const ctx = getDatabaseContext();
+      const wsm = new WebSocketManager(ctx);
+      return setupRoutes(ctx, wsm, new MessageSendService(ctx, wsm, new PermissionChecker(ctx)));
+    }
+
+    /** Call a route with the METHOD it registered, and no credentials at all. */
+    async function callUnauthenticated(pattern: string, method: string): Promise<number> {
+      const res = await fetch(`${TEST_SERVER_URL}${pattern}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      });
+      return res.status;
+    }
+
+    // No auth: public surface.
+    const PUBLIC = new Set([
+      '/', '/health',
+      '/accounts/authorize/:provider', '/accounts/callback/:provider',
+      // The console SHELL. Public deliberately: it is the sign-in screen and
+      // holds no account data — every byte of that comes from /admin/api/*,
+      // which requires a session. Gating it would gate the only place a
+      // person can sign in.
+      '/admin',
+    ]);
+    // Establish a session; cannot require one.
+    const ESTABLISHING = new Set(['/entities/connect', '/entities/authenticate']);
+    // Browser-session lifecycle for the admin console. /session/create is
+    // guarded by an account token (it is the exchange); the other two are
+    // guarded by the session cookie. None is entity-scoped.
+    const ADMIN_SESSION = new Set([
+      '/admin/api/session/create',
+      '/admin/api/session/current',
+      '/admin/api/session/destroy',
+    ]);
+    // Guarded by an ACCOUNT token, not an entity session.
+    const ACCOUNT_SCOPED = new Set([
+      '/accounts/create-entity', '/accounts/list-entities', '/accounts/revoke-entity',
+      '/admin/api/grants', '/admin/api/grants/list', '/admin/api/grants/revoke',
+      '/admin/api/permissions', '/admin/api/permissions/list', '/admin/api/permissions/delete',
+      '/admin/api/directory',
+      '/admin/api/entities/availability', '/admin/api/entities/rederive-queue',
+      '/admin/api/tasks/unattended',
+      '/admin/api/rulings', '/admin/api/rulings/list', '/admin/api/rulings/revoke',
+    ]);
+
     // ------------------------------------------------------------------
     // Completeness, not spot-checks.
     //
@@ -1166,45 +1224,8 @@ describe('FAM Server Integration', () => {
     // ------------------------------------------------------------------
 
     test('every registered route is classified, and no entity-scoped route answers without a session', async () => {
-      const { setupRoutes } = await import('../routes');
-      const { WebSocketManager } = await import('../websocket');
-      const { MessageSendService } = await import('../services/messageSend');
-      const { PermissionChecker } = await import('../services/permissionChecker');
+      const routes = await registeredRoutes();
 
-      const ctx = getDatabaseContext();
-      const wsm = new WebSocketManager(ctx);
-      const routes = setupRoutes(ctx, wsm, new MessageSendService(ctx, wsm, new PermissionChecker(ctx)));
-
-      // No auth: public surface.
-      const PUBLIC = new Set([
-        '/', '/health',
-        '/accounts/authorize/:provider', '/accounts/callback/:provider',
-        // The console SHELL. Public deliberately: it is the sign-in screen and
-        // holds no account data — every byte of that comes from /admin/api/*,
-        // which requires a session. Gating it would gate the only place a
-        // person can sign in.
-        '/admin',
-      ]);
-      // Establish a session; cannot require one.
-      const ESTABLISHING = new Set(['/entities/connect', '/entities/authenticate']);
-      // Browser-session lifecycle for the admin console. /session/create is
-      // guarded by an account token (it is the exchange); the other two are
-      // guarded by the session cookie. None is entity-scoped.
-      const ADMIN_SESSION = new Set([
-        '/admin/api/session/create',
-        '/admin/api/session/current',
-        '/admin/api/session/destroy',
-      ]);
-      // Guarded by an ACCOUNT token, not an entity session.
-      const ACCOUNT_SCOPED = new Set([
-        '/accounts/create-entity', '/accounts/list-entities', '/accounts/revoke-entity',
-        '/admin/api/grants', '/admin/api/grants/list', '/admin/api/grants/revoke',
-        '/admin/api/permissions', '/admin/api/permissions/list', '/admin/api/permissions/delete',
-        '/admin/api/directory',
-        '/admin/api/entities/availability', '/admin/api/entities/rederive-queue',
-        '/admin/api/tasks/unattended',
-        '/admin/api/rulings', '/admin/api/rulings/list', '/admin/api/rulings/revoke',
-      ]);
 
       const unclassified: string[] = [];
       const enforced: string[] = [];
@@ -1249,6 +1270,119 @@ describe('FAM Server Integration', () => {
         if (status !== 401) forged.push({ route, status });
       }
       expect(forged).toEqual([]);
+    });
+
+    // ------------------------------------------------------------------
+    // ⚠️ THE CLASSIFICATION EXEMPTS, AND MOST OF THE SURFACE IS EXEMPT.
+    //
+    // The test above says "every registered route is CLASSIFIED", and that is
+    // true. It does not say every registered route is CHECKED, and measured on
+    // 2026-09-06 the difference is most of them:
+    //
+    //     registered patterns .................. 56
+    //     asserted by the test above ........... 30
+    //     EXEMPTED BY A CLASSIFICATION SET ..... 26   (PUBLIC 5, ESTABLISHING 2,
+    //                                                  ADMIN_SESSION 3,
+    //                                                  ACCOUNT_SCOPED 16)
+    //
+    // A label with no consequence is a comment. Putting a route in
+    // ACCOUNT_SCOPED silences every assertion about it, and nothing anywhere
+    // checks that an account-scoped route asks for an account token — so the
+    // safety net has an opt-out and the opt-out is one line.
+    //
+    // ⚠️ THAT IS NOT A HYPOTHETICAL PROPERTY OF THE DESIGN, IT IS THE SAME
+    // SHAPE THIS SUITE KEEPS FINDING: a device whose comment describes a
+    // stronger guarantee than its code delivers, staying green either way. The
+    // enumerator's own comment says a new route "cannot default into being
+    // untested" — correct, and it CAN be classified into being untested.
+    //
+    // So each class now has a testable consequence:
+    //
+    //   ACCOUNT_SCOPED / ADMIN_SESSION  must answer 401 with no credentials.
+    //                                   Different credential, same refusal.
+    //   PUBLIC / ESTABLISHING           must NOT answer 401. They are reachable
+    //                                   by design, and a mislabel in THAT
+    //                                   direction hides a broken sign-in.
+    //
+    // Measured before writing them: all 26 already behave. This closes a gap
+    // in the DEVICE, not in the server — nothing here was broken, and nothing
+    // would have said so if it became broken.
+    //
+    // Two tests rather than one, because they assert two DIFFERENT claims and
+    // a single test reports either failure under one name. (Codacy also read
+    // the combined version at complexity 9 against a limit of 8, which was a
+    // fair reading of a loop carrying two branches and two verdicts.)
+    // ------------------------------------------------------------------
+
+    /**
+     * Every non-parameterised registered pattern in `set`, with its method.
+     *
+     * Parameterised patterns cannot be called by their pattern text; the two
+     * that exist are OAuth redirects, classified PUBLIC by inspection rather
+     * than by a request to a literal ":provider".
+     */
+    async function classified(set: Set<string>): Promise<Array<[string, string]>> {
+      const out: Array<[string, string]> = [];
+      for (const [pattern, route] of await registeredRoutes()) {
+        if (!pattern.includes(':') && set.has(pattern)) out.push([pattern, route.method]);
+      }
+      return out;
+    }
+
+    /**
+     * ⚠️ A VACUITY GUARD ON THE LOOP, NOT ON THE SETS — and the difference was
+     * measured rather than assumed.
+     *
+     * I first wrote this as "so the exemptions cannot silently empty" and
+     * tested it: removing three entries from ACCOUNT_SCOPED left 69 pass, 0
+     * fail. The guard did not fire and SHOULD NOT HAVE. Deleting an entry does
+     * not create a hole — the route falls through to `enforced` in the test
+     * above and is asserted 401, which is STRICTER. A stale entry matching no
+     * route is harmless for the same reason.
+     *
+     * The dangerous edit is the opposite one: ADDING a real route to an exempt
+     * set, which silences every assertion about it. That is what the two tests
+     * below catch, and it is the whole point of them.
+     *
+     * So this guards only the case where the loop matches NOTHING — a broken
+     * `registeredRoutes()`, or a route map that came back empty — because then
+     * the failure array is trivially `[]` and the test passes having examined
+     * nothing. Floors are deliberately far below today's counts for the reason
+     * `gates.ts` gives: one set near the current value reddens on a legitimate
+     * deletion and teaches people to raise it.
+     */
+    function expectExamined(routes: Array<[string, string]>, floor: number): void {
+      expect(routes.length).toBeGreaterThan(floor);
+    }
+
+    test('⚠️ a route exempted as CREDENTIALLED still refuses without credentials', async () => {
+      const routes = [...(await classified(ACCOUNT_SCOPED)), ...(await classified(ADMIN_SESSION))];
+      expectExamined(routes, 15);
+
+      // 401 EXACTLY, for the reason the test above gives: any-4xx answers "did
+      // this fail?" when the question is "were credentials required?".
+      const wrong: Array<{ route: string; status: number }> = [];
+      for (const [pattern, method] of routes) {
+        const status = await callUnauthenticated(pattern, method);
+        if (status !== 401) wrong.push({ route: pattern, status });
+      }
+      expect(wrong).toEqual([]);
+    });
+
+    test('⚠️ a route exempted as PUBLIC is actually reachable, or the label hides a gate', async () => {
+      const routes = [...(await classified(PUBLIC)), ...(await classified(ESTABLISHING))];
+      expectExamined(routes, 3);
+
+      // Not asserting 200: /entities/connect answers 400 to an empty body,
+      // which is correct and is not a credential refusal. The claim tested here
+      // is only that these are NOT gated — mislabelling a gated route as PUBLIC
+      // would hide it, and a broken sign-in screen looks like a policy choice.
+      const gated: Array<{ route: string; status: number }> = [];
+      for (const [pattern, method] of routes) {
+        const status = await callUnauthenticated(pattern, method);
+        if (status === 401) gated.push({ route: pattern, status });
+      }
+      expect(gated).toEqual([]);
     });
   });
 

@@ -63,6 +63,75 @@ describe('every version upgrades to current', () => {
   }
 });
 
+describe('migration 20 — challenges rekeyed by (entity_id, nonce)', () => {
+  // ⚠️ THE MATRIX ABOVE PROVES THE MIGRATION RUNS AND IS RE-APPLIABLE. IT
+  // CANNOT SEE WHETHER DATA SURVIVED IT. Migration 20 REBUILDS the `challenges`
+  // table — create, copy, drop, rename — and a copy step that silently moved no
+  // rows would pass every structural test in this file.
+  //
+  // A lost challenge is not catastrophic (the client retries `connect`), which
+  // is exactly why nothing would report it. That is the reason to assert it
+  // rather than the reason to skip it.
+
+  test('an outstanding challenge survives the rebuild', () => {
+    const db = new Database(':memory:');
+    try {
+      migrateTo(db, 19);
+
+      db.run("INSERT INTO accounts (id) VALUES ('mig20@example.com')");
+      db.run(
+        `INSERT INTO entities (id, account_id, type, public_key, capabilities)
+         VALUES ('a@mig20@example.com', 'mig20@example.com', 'agent', 'pk', '{}')`
+      );
+      db.run(
+        "INSERT INTO challenges (entity_id, nonce, created_at) VALUES (?, ?, datetime('now'))",
+        ['a@mig20@example.com', 'nonce-carried-forward']
+      );
+
+      initializeDatabase(db);
+
+      const row = db
+        .query('SELECT entity_id, nonce FROM challenges WHERE nonce = ?')
+        .get('nonce-carried-forward') as { entity_id: string; nonce: string } | null;
+
+      expect(row).not.toBeNull();
+      expect(row!.entity_id).toBe('a@mig20@example.com');
+    } finally {
+      db.close();
+    }
+  });
+
+  test('and afterwards two challenges for ONE entity can coexist', () => {
+    // The property the rebuild exists for. Before migration 20 the second
+    // INSERT REPLACED the first, which is what made two instances of one entity
+    // lock each other out.
+    const db = new Database(':memory:');
+    try {
+      initializeDatabase(db);
+
+      db.run("INSERT INTO accounts (id) VALUES ('mig20b@example.com')");
+      db.run(
+        `INSERT INTO entities (id, account_id, type, public_key, capabilities)
+         VALUES ('a@mig20b@example.com', 'mig20b@example.com', 'agent', 'pk', '{}')`
+      );
+      for (const nonce of ['first', 'second']) {
+        db.run(
+          "INSERT INTO challenges (entity_id, nonce, created_at) VALUES (?, ?, datetime('now'))",
+          ['a@mig20b@example.com', nonce]
+        );
+      }
+
+      const count = db
+        .query('SELECT COUNT(*) as n FROM challenges WHERE entity_id = ?')
+        .get('a@mig20b@example.com') as { n: number };
+
+      expect(count.n).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe('the machinery the matrix rests on', () => {
   test('migrateTo stops where it is told', () => {
     const db = new Database(':memory:');

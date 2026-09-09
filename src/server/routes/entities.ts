@@ -87,8 +87,14 @@ export function entityRoutes(
         
         validateEntityId(entity_id);
         
-        // Get and consume challenge
-        const challenge = consumeChallenge(ctx.db, entity_id);
+        // Get and consume THE challenge this caller was issued.
+        //
+        // ⚠️ The nonce is part of the lookup because two instances of one
+        // entity may each hold a live challenge (migration 20). Consuming "the"
+        // challenge for an entity used to take whichever row was stored, so a
+        // second instance's connect turned the first's authentication into an
+        // "Invalid signature" over a signature that was perfectly valid.
+        const challenge = consumeChallenge(ctx.db, entity_id, nonce);
         if (!challenge) {
           throw new ChallengeExpiredError();
         }

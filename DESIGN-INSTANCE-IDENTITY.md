@@ -77,6 +77,18 @@ instances both authenticate cleanly and nothing notices — **which is correct
 behaviour and exactly why the deliberate mechanism below has to exist.** Landing
 the fix without it would trade a misleading signal for no signal.
 
+⚠️ **UPDATE — THE FIX LANDED FIRST, AND THE WARNING WENT WITH IT.** #50 merged
+migration 20, and it closed #48, which is where this consequence was recorded.
+**The repair closed the issue that carried the warning about the repair**, and
+what survived was a comment inside a migration nobody greps plus this document,
+which is still an open PR. The gap is now tracked as **#52**, filed after the
+fact.
+
+**The general rule, which is what this instance is worth:** *a repair that
+removes an accidental detector must not land before its deliberate replacement,
+or it silently reduces coverage while reading as a fix.* **And an issue is not a
+durable home for a warning about the fix that closes it.**
+
 **Row two is the constraint everything else must respect.** Multiple concurrent
 connections per entity is a *feature* — a CLI and an MCP adapter attached at
 once is the normal case. **Any mechanism here that reduces to "one session per
@@ -308,6 +320,20 @@ two rows**, and **the write-then-read-back probe only when an instance must
 settle the question about itself** — which remains the one case the other two
 cannot serve, because a lone instance sees no second row to compare.
 
+⚠️ **AND THE ORDERING IS A RECOMMENDATION, NOT A DESCRIPTION OF PRACTICE.**
+Measured `list_peers scope=machine`, 2026-09-09 05:4xZ:
+
+    rows returned .................................. 17
+    rows whose summary names a DIFFERENT id as own ..  0
+    rows whose summary names THEIR OWN id at all ....  1   (this lane's)
+
+**"No twins detected" and "nobody has populated the detector" are the same
+reading.** The first line is what a reader takes away; the third is why they
+should not. **A detector that requires voluntary adoption reports clean until it
+is adopted, and the clean reading is what stops anyone adopting it** — so the
+count belongs beside the recommendation, or the recommendation reads as a
+convention already in use.
+
 ---
 
 ## Delivery of the notice
@@ -343,16 +369,58 @@ forever.
 
 ## Open questions
 
-- **Flap protection.** Two processes that both keep reconnecting will evict each
-  other in turn. A minimum hold time before a fresh claim can supersede is the
-  obvious remedy; the value is arbitrary and should be measured rather than
-  guessed.
-- **Human-owned entities.** A person's entity legitimately runs on a phone and a
-  laptop. Under this design those are two instances and the second would evict
-  the first. **The likely answer is that eviction applies to `type = 'agent'`
-  and not to `type = 'human'`, but that is a product call, not a mechanical
-  one**, and it is not being decided here.
-- **What the superseded process should do with in-flight work.** The ruling says
-  it may claim a new identity; it does not say whether messages already
-  addressed to the old identity follow it. They should not, but that deserves
-  its own argument.
+### Flap protection — build it, and measure the floor
+
+Two processes that both keep reconnecting will evict each other in turn.
+**Ping-pong eviction is worse than the duplication it resolves**, because it
+converts an invisible problem into a loud one that also destroys both parties'
+sessions. A minimum hold time before a fresh claim may supersede is the remedy.
+
+⚠️ **THE VALUE MUST BE MEASURED, NOT PICKED.** Measure the observed
+restart-to-reconnect interval and set the floor above it, **stating the
+measurement in the code beside the constant.** An arbitrary constant here is a
+literal carrying an unstated relationship to reality — it will look principled,
+it will be wrong under a workload nobody tested, and nothing will say which.
+
+### Human-owned entities — CireSnave's call, and the code must not pre-empt it
+
+A person's entity legitimately runs on a phone and a laptop. Under this design
+those are two instances and the second evicts the first. **The likely answer is
+that eviction applies to `type = 'agent'` and not to `type = 'human'` — but that
+is a product call, not a mechanical one**, and it is not decided here.
+
+⚠️ **BUILD THE POLICY AS A LOOKUP, NOT A HARDCODE.** Whatever he rules should be
+a one-line change, and neither branch should be implemented in advance —
+including the one that looks obviously right. **A mechanism that ships with the
+likely answer baked in has answered the question while appearing to defer it.**
+
+### In-flight work — answered, because deferring it loses the argument
+
+Earlier drafts said messages addressed to a superseded identity *"should not"*
+follow it and left the reasoning for later. **That is the deferral this project
+keeps finding: the next reader reopens the question with no record of why, and
+re-derives it from scratch or decides differently.** So:
+
+**Messages follow the IDENTITY, not the process.** A message addressed to `X`
+was addressed to *whoever holds* `X`. After supersession the newcomer holds it,
+so undelivered messages are the newcomer's to poll — they are not forwarded to
+the superseded process and they are not destroyed.
+
+Three reasons, in order of weight:
+
+1. ⚠️ **Forwarding would make eviction cosmetic.** The evicted process keeps
+   receiving, which is precisely the state eviction exists to end.
+2. ⚠️ **A superseded process is often superseded BECAUSE it is stale.**
+   Forwarding hands fresh instructions to the actor least qualified to act on
+   them — the failure is not that work is lost, it is that work is done twice
+   by two parties with divergent state.
+3. **Destroying them would be worse than either.** `/send-message` returns
+   success as soon as the row exists, so the sender already holds positive
+   evidence of delivery. **An ack that does not mean delivery is the worst shape
+   a messaging failure can take, and it is invisible precisely because nothing
+   bounces.** Retain, do not forward, do not delete.
+
+**What IS lost: work the superseded process was holding in memory.** That is
+real and it is the cost of evict-old. The ruling's mitigation is that the
+process is *told*, and may claim a fresh identity if it decides the work is
+worth continuing — which is a decision only that process can make.

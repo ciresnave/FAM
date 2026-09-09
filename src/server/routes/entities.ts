@@ -18,6 +18,7 @@ import {
   verifyChallengeResponse,
 } from '../../crypto/challenge';
 import { requireEntitySession } from '../middleware/auth';
+import { claimIdentity } from '../services/instanceClaim';
 import { DEFAULT_PORT } from '../../config';
 
 // ============================================================================
@@ -76,7 +77,7 @@ export function entityRoutes(
       pattern: '/entities/authenticate',
       handler: async (req) => {
         const body = await req.json() as any;
-        const { entity_id, nonce, signature } = body;
+        const { entity_id, nonce, signature, instance_id } = body;
         
         if (!entity_id || !nonce || !signature) {
           return new Response(
@@ -116,8 +117,23 @@ export function entityRoutes(
           throw new SignatureInvalidError();
         }
         
-        // Create session
-        const session = ctx.sessions.create(entity_id);
+        // ⚠️ THE SESSION CARRIES THE INSTANCE, and the claim happens after it,
+        // so the new session survives its own supersession sweep.
+        //
+        // `instance_id` is OPTIONAL and its absence is a real state: a client
+        // that does not send one makes no claim and is never superseded. That
+        // is what keeps `type='human'` undecided — a person's phone and laptop
+        // are legitimately two instances, and answering that here in EITHER
+        // direction would settle a product question inside a mechanism.
+        const claimingInstance = typeof instance_id === 'string' && instance_id !== ''
+          ? instance_id
+          : undefined;
+
+        const session = ctx.sessions.create(entity_id, undefined, claimingInstance);
+
+        const claim = claimingInstance
+          ? claimIdentity(ctx, entity_id, claimingInstance)
+          : undefined;
         
         // Update entity status
         ctx.entities.updateStatus(entity_id, 'online');
@@ -137,6 +153,10 @@ export function entityRoutes(
           JSON.stringify({
             session_id: session.id,
             websocket_url: wsUrl,
+            // Present only when the caller claimed the identity. `generation`
+            // is a fencing token: it advances only when a DIFFERENT instance
+            // takes over, so a holder can tell "still mine" from "taken".
+            ...(claim ? { generation: claim.generation, superseded: claim.superseded } : {}),
             undelivered_messages: undelivered,
             availability: entity.availability,
           }),

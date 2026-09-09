@@ -97,6 +97,21 @@ export async function requireEntitySession(
 
   const session = ctx.sessions.getById(sessionId);
   if (!session) {
+    // ⚠️ SAY WHICH KIND OF DEAD. A superseded session is a live client whose
+    // identity another instance took; "Invalid session" would send its operator
+    // to check credentials that were never wrong, which is precisely the defect
+    // migration 20 fixed for `connect` and this one would reintroduce for
+    // `authenticate`.
+    //
+    // The refusal is still 401, so the MCP client's existing terminal
+    // classification still fires and a superseded instance still stops
+    // retrying. Only the REASON changes — no second notification path.
+    if (ctx.sessions.getSupersededById(sessionId)) {
+      throw new UnauthorizedError(
+        'Session superseded: another instance of this entity has claimed the identity. ' +
+          'This process is no longer the holder and should not reconnect under it.'
+      );
+    }
     throw new UnauthorizedError('Invalid session');
   }
 

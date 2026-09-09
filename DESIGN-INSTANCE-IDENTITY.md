@@ -206,12 +206,42 @@ diagnose a stale duplicate registration that was still heartbeating — so
 is the detection half of this design and it works against a broker that will
 never grow a generation counter.
 
-⚠️ **It has one hard prerequisite: an instance must be able to read its own
-identity.** A peer that cannot ask *"which row is mine?"* cannot compare the row
-to what it wrote, so it cannot run step 4 at all. **On claude-peers today a peer
-cannot read its own id**, which is why diagnosing a twin currently falls back to
-process-tree forensics. `whoami` is not a convenience; it is the prerequisite
-for self-diagnosis.
+⚠️ **It has one hard prerequisite — an instance must be able to read its own
+identity — AND THAT PREREQUISITE IS NOW BUILT.** A peer that cannot ask *"which
+row is mine?"* cannot compare the row to what it wrote, so it cannot run step 4
+at all.
+
+**Corrected 2026-09-09, before this document was merged: `whoami` EXISTS on
+claude-peers and returns this instance's own `id`, `pid`, `cwd`, `git_root`,
+`summary`, `registered_at` and `last_seen`.** An earlier draft of this section
+said a peer could not read its own id and that diagnosis fell back to
+process-tree forensics. **That was true when it was written and is no longer
+true.** A stale *"not built"* is worse than a stale *"done"* — it invites
+somebody to build a second one — so the sentence is replaced rather than
+annotated.
+
+⚠️ **AND IT SHIPS WITH A CHEAPER DETECTOR THAN THE PROBE ABOVE, which this
+document should prefer.** Two refinements, both from the tool's own contract:
+
+**1 — A SELF-IDENTIFYING SUMMARY.** `list_peers` excludes the caller, so a
+summary cannot name its own address unless the instance asks. Put the id INTO
+the summary and a twin becomes visible **to every other peer at a glance,
+without anybody running a probe**: *the stale row's summary names an id that is
+not that row's id.* No write, no read-back, no comparison — the inconsistency is
+on the face of the record.
+
+**2 — `registered_at`, NOT `last_seen`.** ⚠️ **A superseded registration keeps
+heartbeating**, so *"recently seen"* does not mean *"live"*. When two rows claim
+one identity, the older `registered_at` is the stale one. **This is the same
+insight as the write-then-read-back probe reduced to a FIELD CHOICE** — and a
+field choice is available to a reader who is not the affected instance, which the
+probe is not.
+
+So the ordering this document should recommend is: **a self-identifying summary
+first** (passive, visible to others, zero cost), **`registered_at` when comparing
+two rows**, and **the write-then-read-back probe only when an instance must
+settle the question about itself** — which remains the one case the other two
+cannot serve, because a lone instance sees no second row to compare.
 
 ---
 

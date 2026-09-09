@@ -91,6 +91,17 @@ export interface AuthenticateResponse {
     text: string;
     sent_at: string;
     delivered: number;
+    /**
+     * Whether `text` is a sealed envelope rather than a message body.
+     *
+     * ⚠️ THE SERVER HAS ALWAYS SENT THIS AND THIS TYPE DENIED IT. `getUndelivered`
+     * is `SELECT m.*` and `messages` has a `sealed` column, so the field was on
+     * the wire the whole time. A reader of this interface concluded the signal
+     * did not exist and pushed envelope JSON into an agent context — the SAME
+     * omission already recorded on `WebSocketMessagePush` in types/index.ts,
+     * corrected there and not here.
+     */
+    sealed?: boolean;
   }>;
 }
 

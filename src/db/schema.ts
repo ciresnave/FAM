@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite';
 // Schema Version
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 20;
+export const CURRENT_SCHEMA_VERSION = 21;
 
 // ============================================================================
 // Schema Definition (base — v1)
@@ -872,6 +872,72 @@ const MIGRATIONS: Record<number, MigrationStep[]> = {
       // The sweep and the FK cascade both filter by entity.
       db.run('CREATE INDEX IF NOT EXISTS idx_challenges_entity ON challenges(entity_id)');
     },
+  ],
+
+  21: [
+    // ⚠️ WHICH RUNNING PROCESS HOLDS AN IDENTITY — THE QUESTION NO KEY CAN
+    // ANSWER. See DESIGN-INSTANCE-IDENTITY.md.
+    //
+    // A duplicated agent holds a COPY OF THE KEY, so every cryptographic check
+    // answers "same identity" correctly and uselessly. Challenge-response
+    // settles *are you 1234*; it cannot settle *are you the ONLY 1234*, because
+    // that is a fact about processes and no key knows about processes.
+    //
+    // The discriminator is an INSTANCE ID minted at process start and held only
+    // in memory. Two connections of one process present the same one; a
+    // restarted or cloned process mints a new one.
+    //
+    // ⚠️ `generation` IS A FENCING TOKEN, NOT A COUNTER FOR ITS OWN SAKE. It
+    // advances only when a DIFFERENT instance claims the identity, so a holder
+    // can tell "I am still current" from "someone took this" without asking.
+    `CREATE TABLE IF NOT EXISTS entity_claims (
+      entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+      generation INTEGER NOT NULL,
+      instance_id TEXT NOT NULL,
+      claimed_at TEXT DEFAULT (datetime('now'))
+    )`,
+
+    // ⚠️ SEPARATE FROM `entities` ON PURPOSE. Identity is durable and a claim
+    // is transient — the same separation this project already keeps between an
+    // entity and its sessions. Putting a runtime claim in the identity table
+    // invites a later reader to treat "who holds it now" as part of "who it is".
+
+    // ⚠️ NULLABLE, AND THE NULL IS A REAL STATE. A session created without an
+    // instance id belongs to a client that has NOT opted in to claiming, and it
+    // is never superseded. That is what keeps the `type='human'` question OPEN:
+    // a person's phone and laptop are legitimately two instances, and deciding
+    // that here — in either direction — would answer a product question inside
+    // a mechanism.
+    (db: Database) => {
+      const cols = db.query('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
+      if (!cols.some(c => c.name === 'instance_id')) {
+        db.run('ALTER TABLE sessions ADD COLUMN instance_id TEXT');
+      }
+      if (!cols.some(c => c.name === 'superseded_at')) {
+        db.run('ALTER TABLE sessions ADD COLUMN superseded_at TEXT');
+      }
+    },
+
+    // \u26a0\ufe0f SUPERSESSION MARKS, IT DOES NOT DELETE \u2014 BECAUSE DELETING DESTROYS
+    // THE REASON.
+    //
+    // A deleted session is indistinguishable from one that expired, one whose
+    // id was mistyped, and one that never existed. The holder is told "Invalid
+    // session" and sent to look at its credentials, which were never wrong.
+    //
+    // That is exactly the defect migration 20 fixed one version ago: two
+    // instances of one entity failed to authenticate and were told "Invalid
+    // signature" over signatures that were valid. A REPAIR THAT REPRODUCES THE
+    // DEFECT IT WAS WRITTEN FOR, ONE TABLE OVER, IS THE FAILURE THIS COMMENT
+    // EXISTS TO PREVENT.
+    //
+    // Keeping the row lets the 401 name its cause, which is what makes the
+    // existing terminal-failure path say something true instead of something
+    // merely permanent.
+
+    // Supersession deletes an entity's sessions whose instance differs from the
+    // new claimant's, so the lookup is (entity_id, instance_id).
+    'CREATE INDEX IF NOT EXISTS idx_sessions_entity_instance ON sessions(entity_id, instance_id)',
   ],
 };
 

@@ -128,10 +128,36 @@ export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> 
           );
         }
         
-        // Validate session exists and belongs to this entity
-        // (uses the shared server context — single source of truth)
+        // Validate session exists and belongs to this entity.
+        //
+        // ⚠️ SHARED CONTEXT IS NOT A SHARED IMPLEMENTATION. This block reads the
+        // same table as `requireEntitySession` and decides independently of it.
+        // The previous comment here said "single source of truth", which is true
+        // of the DATA and was read as true of the LOGIC — and the two had already
+        // drifted by the time anyone checked.
         const session = ctx.sessions.getById(sessionId);
         if (!session || session.entity_id !== entityId) {
+          // ⚠️ SAY WHICH KIND OF DEAD, exactly as the HTTP path does. A
+          // superseded session is a live client whose identity another instance
+          // took; "Invalid session" sends its operator to check credentials that
+          // were never wrong. `getById` excludes superseded rows, so without this
+          // a superseded holder lands in the same branch as a mistyped id.
+          //
+          // Still 401, so the client's terminal classification fires and a
+          // superseded instance still stops retrying. Only the REASON changes.
+          //
+          // The entity match is required before saying "superseded": here the
+          // caller SUPPLIES the entity id, unlike the HTTP path where it comes
+          // from the session, so answering without it would describe a session
+          // the caller has not shown they own.
+          const superseded = !session ? ctx.sessions.getSupersededById(sessionId) : null;
+          if (superseded && superseded.entity_id === entityId) {
+            return new Response(
+              'Session superseded: another instance of this entity has claimed the identity. ' +
+                'This process is no longer the holder and should not reconnect under it.',
+              { status: 401 }
+            );
+          }
           return new Response('Invalid session', { status: 401 });
         }
         

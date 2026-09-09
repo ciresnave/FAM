@@ -61,6 +61,24 @@ stops work that should happen, a false *not built* causes work that should not.*
   `observe` never silently updates a pin, and `acceptChange` requires the new
   key to match what was recorded as pending — provenance, not merely shape
 
+⚠️ **PARTLY BUILT AS OF 2026-09-09, AND THE PARAGRAPH BELOW WAS TRUE WHEN WRITTEN AND IS NOT NOW.** Re-measured at `origin/main` `66892b59`:
+
+- **`fetchAccountKey` IS called** — `src/adapters/cli/commands/account.ts:222`.
+- **`signVoucher` IS called** — `src/adapters/cli/accountKey.ts:128`.
+- **`resolveEntityKey` IS called** — `src/messaging/senderIdentity.ts:67`, reached from **two** consumers: the CLI (`src/adapters/cli/commands/message.ts:286`) and the MCP adapter (`src/adapters/mcp/channel-push.ts:111`), both through `resolveSenderIdentity`.
+- **`signRevocation` and the key-pin `observe` still have no call sites** outside their own modules and tests. That half stands.
+- ⚠️ **`resolveVoucherChain` has never existed under that name** — 0 occurrences anywhere in the tree. The export is `resolveEntityKey` (`src/crypto/voucher.ts:228`). The correct name is used in `src/adapters/cli/accountKey.ts:7`.
+
+*(Controls: `prepareSealedDirect` still returns real call sites, so the query discriminates; `resolveVoucher*` returns 0 across all `*.ts`, so the missing symbol is a real absence and not a failed query.)*
+
+**WHAT REMAINS TRUE, AND IT IS THE PART THAT MATTERS:** `src/server/services/messageSend.ts` consults the chain **zero times** *(control: 4 `async` in that file, so it was read)*. **The SERVER-side send path does not verify a voucher.** So *"entity identity still rests on the relay's word"* holds for anything that goes through the server, and the sentence below is still the right conclusion — but it is no longer true that **nothing** calls the chain, and it has not been since the CLI and MCP adapters were wired.
+
+⚠️ **This paragraph went stale silently because nothing pins it.** Only `ROADMAP.md` and `CLAUDE.md` are read and asserted on by tests; `DESIGN-FEDERATION.md` is cited in prose by four source files and pinned by none. **A tripwire now guards the remaining half** — `src/__tests__/deferrals.test.ts`, "deferral: the server send path does not verify a voucher".
+
+**Kept below rather than rewritten, because the record of what was measured and when is the point.** The correction in `src/adapters/cli/accountKey.ts:4-11` — *"Measured before this file existed"* — was accurate and predates this note; it simply sat in a source header where a reader of this document would not find it.
+
+---
+
 ⚠️ **NOT BUILT, AND THIS IS NOW THE WHOLE OF THE GAP: NOTHING CALLS ANY OF IT.**
 Measured — `fetchAccountKey`, `signVoucher`, `signRevocation`,
 `resolveVoucherChain` and `observe` each have **zero call sites outside their

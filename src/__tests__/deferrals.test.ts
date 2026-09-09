@@ -157,3 +157,56 @@ describe('⚠️ deferral: whoami reaches lanes only as they restart — DETECTO
     expect(roadmap).toContain('whoami` reaches a lane only when that lane restarts');
   });
 });
+
+describe('deferral: the server send path does not verify a voucher', () => {
+  // OWNER: FAM lane.
+  // WHY DEFERRED: the chain is wired into the CLI and the MCP adapter through
+  // `resolveSenderIdentity`, but `src/server/services/messageSend.ts` still
+  // consults it zero times, so anything routed through the server rests on the
+  // relay's word for entity identity. Recorded in DESIGN-FEDERATION.md.
+  //
+  // ⚠️ THIS TRIPWIRE EXISTS BECAUSE THE CLAIM IT GUARDS ALREADY WENT STALE ONCE,
+  // SILENTLY. DESIGN-FEDERATION.md asserted "NOTHING CALLS ANY OF IT" of five
+  // symbols; by 2026-09-09 three of them had real call sites and a fourth
+  // (`resolveVoucherChain`) had never existed under that name. Nothing pinned
+  // the paragraph — only ROADMAP.md and CLAUDE.md are read by tests — so the
+  // document aged while the code moved underneath it.
+  //
+  // ⚠️ The subject is a SOURCE FILE, not this test and not the document making
+  // the claim. A guard that reads the file its own assertion is written in is
+  // true by construction, which this file has already been bitten by once.
+  test('⚠️ TRIPWIRE — delete this when the server send path verifies vouchers', () => {
+    const sendPath = readFileSync(
+      join(ROOT, 'src', 'server', 'services', 'messageSend.ts'),
+      'utf8'
+    );
+
+    // Non-vacuity: if the file stops looking like the send service, this test is
+    // measuring nothing and should say so rather than pass.
+    expect(
+      sendPath.length,
+      'messageSend.ts is unexpectedly small — repoint this tripwire rather than trusting it'
+    ).toBeGreaterThan(200);
+
+    const consultsChain =
+      sendPath.includes('resolveEntityKey') ||
+      sendPath.includes('resolveSenderIdentity') ||
+      sendPath.includes('voucher') ||
+      sendPath.includes('Voucher');
+
+    if (consultsChain) {
+      throw new Error(
+        'The SERVER send path now references the voucher chain. That is the deferred work, ' +
+          'and this tripwire has done its job.\n' +
+          '  DELETE: this test.\n' +
+          '  ALSO UPDATE: DESIGN-FEDERATION.md — the "entity identity still rests on the ' +
+          'relay\'s word" conclusion, and the 2026-09-09 correction above it, both describe ' +
+          'a server that does not verify. If it now does, that whole section is the stale ' +
+          'one, and a stale "not built" is the direction this project has already been ' +
+          'bitten by three times.'
+      );
+    }
+
+    expect(consultsChain).toBe(false);
+  });
+});

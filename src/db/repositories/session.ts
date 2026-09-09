@@ -158,6 +158,20 @@ export class SessionRepository {
    * Deliberately separate from `getById` rather than a flag on it: a boolean
    * parameter would let a caller ask for a dead session by accident, and every
    * caller that forgot the argument would get the safe answer only by luck.
+   *
+   * ⚠️ THE ACCURATE MESSAGE HAS A LIFETIME OF ABOUT SIXTY SECONDS, AND THAT IS
+   * A TRADE RATHER THAN AN OVERSIGHT. A superseded session stops heartbeating,
+   * so `cleanupStale` deletes it on the same 60-second rule as any other idle
+   * session — after which a late caller is told "Invalid session" again.
+   *
+   * In practice the superseded client learns within seconds, because its next
+   * heartbeat is the request that gets refused. A client that was asleep for
+   * five minutes gets the generic answer.
+   *
+   * Exempting superseded rows from the sweep would keep the message forever and
+   * make the table grow without bound in the number of supersessions. Bounded
+   * retention with a stated window beats an unbounded table, and stating the
+   * window beats discovering it.
    */
   getSupersededById(id: string): Session | null {
     const stmt = this.db.prepare(`
@@ -174,6 +188,7 @@ export class SessionRepository {
     const stmt = this.db.prepare(`
       SELECT * FROM sessions
       WHERE entity_id = ?
+      AND superseded_at IS NULL
       AND last_heartbeat > datetime('now', '-60 seconds')
     `);
 
@@ -185,7 +200,8 @@ export class SessionRepository {
    */
   getCountByEntityId(entityId: EntityId): number {
     const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM sessions WHERE entity_id = ?
+      SELECT COUNT(*) as count FROM sessions
+      WHERE entity_id = ? AND superseded_at IS NULL
     `);
 
     const result = stmt.get(entityId) as { count: number };
@@ -198,7 +214,8 @@ export class SessionRepository {
   getActive(): Session[] {
     const stmt = this.db.prepare(`
       SELECT * FROM sessions
-      WHERE last_heartbeat > datetime('now', '-60 seconds')
+      WHERE superseded_at IS NULL
+      AND last_heartbeat > datetime('now', '-60 seconds')
     `);
 
     return stmt.all() as Session[];
@@ -210,7 +227,8 @@ export class SessionRepository {
   isActive(entityId: EntityId): boolean {
     const stmt = this.db.prepare(`
       SELECT 1 FROM sessions
-      WHERE entity_id = ? AND last_heartbeat > datetime('now', '-60 seconds')
+      WHERE entity_id = ? AND superseded_at IS NULL
+      AND last_heartbeat > datetime('now', '-60 seconds')
     `);
 
     return stmt.get(entityId) !== null;
@@ -293,7 +311,8 @@ export class SessionRepository {
   getActiveCount(): number {
     const stmt = this.db.prepare(`
       SELECT COUNT(*) as count FROM sessions
-      WHERE last_heartbeat > datetime('now', '-60 seconds')
+      WHERE superseded_at IS NULL
+      AND last_heartbeat > datetime('now', '-60 seconds')
     `);
 
     const result = stmt.get() as { count: number };

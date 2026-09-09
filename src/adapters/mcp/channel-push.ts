@@ -5,7 +5,7 @@
 
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { FamClient, AuthenticateResponse } from './client';
-import type { WebSocketMessagePush } from '../../types';
+import type { WebSocketMessagePush, EntityId } from '../../types';
 import { readIncoming } from '../../messaging/receive';
 import { resolveSenderIdentity } from '../../messaging/senderIdentity';
 import { getPeerAnchorKey } from '../cli/peerAnchors';
@@ -142,58 +142,98 @@ export class ChannelPushHandler {
     });
   }
   
+  /**
+   * Open one incoming message, or explain why it could not be opened.
+   *
+   * ⚠️ SHARED BY THE LIVE PATH AND THE BACKLOG PATH, AND THAT IS THE POINT.
+   * This logic used to live inside `handleMessage` only. `handleUndelivered` —
+   * its sibling, twenty lines below — pushed `text` straight through, so the
+   * offline path had no decryption, no signature check, no replay window and no
+   * `sealed` flag. The envelope JSON was observed arriving in a real client's
+   * context.
+   *
+   * The instance was one missing call. The CLASS is that two branches of one
+   * decision were written separately, so the fix is not to add the guard to the
+   * second branch — it is to leave only one branch to guard. Four instances of
+   * that shape were measured in this repository in a single day.
+   *
+   * ⚠️ OPENED BEFORE IT IS PUSHED, AND WITHHELD IF IT CANNOT BE VERIFIED.
+   * `text` for a sealed message is the ENVELOPE — pushing it unopened puts JSON
+   * into an agent's context as though someone had written it. And because anyone
+   * can seal to a published key, decrypting proves only that the message was
+   * addressed here; the signature is what says who wrote it.
+   */
+  private async openIncoming(
+    from: EntityId,
+    text: string,
+    sealed: boolean
+  ): Promise<{ content: string; vouched: boolean; deliverable: boolean }> {
+    const identity = sealed
+      ? await this.identityFor(from)
+      : ({ kind: 'unvouched', publicKey: '' } as const);
+
+    if (identity.kind === 'refused') {
+      // ⚠️ NOTHING IS OPENED. Either the sender could not be established, or
+      // they were and the answer CONTRADICTS the key the relay served.
+      return { content: `[not shown] ${identity.reason}`, vouched: false, deliverable: false };
+    }
+
+    const now = new Date();
+    const read = await readIncoming(
+      { sealed, text, from_entity: from },
+      {
+        recipientEncryptionPrivateKey: this.encryptionPrivateKey,
+        senderIdentityPublicKey: identity.publicKey,
+        // Required for a CHANNEL message: the group envelope wraps the content
+        // key once per member, selected by entity id.
+        recipientEntityId: this.entityId,
+        replay: {
+          seen: await loadSeen(now, REPLAY_WINDOW_MS, this.stores.seenPath),
+          now,
+          windowMs: REPLAY_WINDOW_MS,
+        },
+      }
+    );
+
+    if (read.kind === 'opened' && read.seen) {
+      // Recorded only after it OPENED. A message that could not be read is not
+      // evidence of delivery, and recording it would make a genuine retry look
+      // like a replay.
+      await recordSeen(read.seen, now, REPLAY_WINDOW_MS, this.stores.seenPath);
+    }
+
+    const withheld = read.kind === 'unreadable' || read.kind === 'replayed';
+
+    // ⚠️ `deliverable` IS NOT `kind === 'opened'`, AND THE DIFFERENCE IS A
+    // DATA-LOSS BUG IN EITHER DIRECTION. It gates whether a backlog row may be
+    // acknowledged, so:
+    //
+    //   plaintext   delivered — an unsealed message needed no opening
+    //   opened      delivered
+    //   replayed    ALREADY delivered. Withholding the ack here would re-offer
+    //               it on every reconnect, forever, rendering "[not shown]
+    //               replayed" into an agent's context each time — a permanent
+    //               noise floor on the path whose whole job is to be quiet.
+    //   unreadable  NOT delivered. The key may arrive later; acking destroys it.
+    //
+    // The first draft used `kind === 'opened'` and a test on a mixed batch
+    // caught it: a plain message would never have been acknowledged.
+    return {
+      content: withheld ? `[not shown] ${read.reason}` : read.text,
+      vouched: identity.kind === 'vouched',
+      deliverable: read.kind !== 'unreadable',
+    };
+  }
+
   private handleMessage = async (message: WebSocketMessagePush): Promise<void> => {
     try {
       const senderInfo = this.buildSenderInfo(message);
 
-      // ⚠️ OPENED BEFORE IT IS PUSHED, AND WITHHELD IF IT CANNOT BE VERIFIED.
-      // The push already carries `sealed`, and `text` for a sealed message is
-      // the ENVELOPE — pushing it unopened puts JSON into an agent's context as
-      // though someone had written it. And because anyone can seal to a
-      // published key, decrypting proves only that the message was addressed
-      // here; the signature is what says who wrote it.
-      const identity = message.sealed
-        ? await this.identityFor(message.from)
-        : ({ kind: 'unvouched', publicKey: '' } as const);
-
-      let content: string;
-      let vouched = false;
-
-      if (identity.kind === 'refused') {
-        // ⚠️ NOTHING IS OPENED. Either the sender could not be established, or
-        // they were and the answer CONTRADICTS the key the relay served.
-        content = `[not shown] ${identity.reason}`;
-      } else {
-        vouched = identity.kind === 'vouched';
-        const now = new Date();
-        const read = await readIncoming(
-          { sealed: message.sealed, text: message.text, from_entity: message.from },
-          {
-            recipientEncryptionPrivateKey: this.encryptionPrivateKey,
-            senderIdentityPublicKey: identity.publicKey,
-            // Required for a CHANNEL message: the group envelope wraps the
-            // content key once per member, selected by entity id.
-            recipientEntityId: this.entityId,
-            replay: {
-              seen: await loadSeen(now, REPLAY_WINDOW_MS, this.stores.seenPath),
-              now,
-              windowMs: REPLAY_WINDOW_MS,
-            },
-          }
-        );
-
-        if (read.kind === 'opened' && read.seen) {
-          // Recorded only after it OPENED. A message that could not be read is
-          // not evidence of delivery, and recording it would make a genuine
-          // retry look like a replay.
-          await recordSeen(read.seen, now, REPLAY_WINDOW_MS, this.stores.seenPath);
-        }
-
-        content =
-          read.kind === 'unreadable' || read.kind === 'replayed'
-            ? `[not shown] ${read.reason}`
-            : read.text;
-      }
+      const { content, vouched } = await this.openIncoming(
+        message.from,
+        message.text,
+        message.sealed === true
+      );
 
       await this.pushChannelNotification(content, {
         from_entity: message.from,
@@ -230,24 +270,70 @@ export class ChannelPushHandler {
   
   private handleUndelivered = async (messages: AuthenticateResponse['undelivered_messages']): Promise<void> => {
     try {
+      // ⚠️ ACKNOWLEDGE ONLY WHAT WAS ACTUALLY DELIVERED, not the whole batch.
+      //
+      // This used to be `markDelivered(messages.map(m => m.id))` — every id,
+      // unconditionally, straight after pushing. Two ways that destroyed mail:
+      //
+      //   the push THREW          a closed stdio pipe raises EPIPE; the message
+      //                           reached nobody and was marked delivered anyway
+      //   it could not be OPENED  a sealed message with no usable key rendered
+      //                           "[not shown] …" and was then acked, so it
+      //                           could never be re-read once the key arrived
+      //
+      // Both are now excluded. A message stays undelivered and is offered again.
+      const delivered: number[] = [];
+
       for (const message of messages) {
         const senderInfo = this.buildSenderInfo({ from: message.from_entity });
-        
-        await this.pushChannelNotification(message.text, {
+
+        const { content, vouched, deliverable } = await this.openIncoming(
+          message.from_entity,
+          message.text,
+          message.sealed === true
+        );
+
+        await this.pushChannelNotification(content, {
           from_entity: message.from_entity,
           from_display_name: senderInfo.displayName,
           channel: message.channel_id,
           sent_at: message.sent_at,
           message_id: message.id,
+          sealed: message.sealed === true,
+          sender_vouched: vouched,
           offline_backlog: true,
         });
+
+        // Reached only if the push did not throw.
+        if (deliverable) delivered.push(message.id);
       }
-      
+
+      if (delivered.length > 0) {
+        await this.client.markDelivered(delivered);
+      }
       if (messages.length > 0) {
-        // Mark backlog as delivered
-        await this.client.markDelivered(messages.map(m => m.id));
-        console.error(`[fam-push] Pushed ${messages.length} offline backlog message(s)`);
+        console.error(
+          `[fam-push] Pushed ${messages.length} offline backlog message(s), ` +
+            `acknowledged ${delivered.length}`
+        );
       }
+
+      // ⚠️ THE RESIDUAL, AND IT CANNOT BE FIXED HERE.
+      //
+      // An MCP notification carries no acknowledgement by protocol — no id, no
+      // response. `pushChannelNotification` resolving means "written to the
+      // pipe". So this code can detect a DEAD pipe but NOT a live pipe that
+      // nobody is reading: a client which authenticates without registering a
+      // handler for `notifications/claude/channel` still consumes its backlog,
+      // silently on both sides. Measured against a real Python MCP client, which
+      // drops an unbound notification at `logger.debug`.
+      //
+      // The real fix is that the ACK MUST BELONG TO THE RECEIVER, and the server
+      // already says so in prose at routes/entities.ts — "the client must
+      // acknowledge via /messages/delivered after processing". Doing that here
+      // needs a tool the client calls, which is a contract change this system is
+      // not getting. Recorded in DESIGN-SYNAPSE-HANDOVER.md as a requirement on
+      // the replacement rather than left as a surprise.
     } catch (e) {
       console.error('[fam-push] Failed to push undelivered messages:', e);
     }

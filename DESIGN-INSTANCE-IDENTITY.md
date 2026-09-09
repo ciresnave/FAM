@@ -242,18 +242,48 @@ is the detection half of this design and it works against a broker that will
 never grow a generation counter.
 
 ⚠️ **It has one hard prerequisite — an instance must be able to read its own
-identity — AND THAT PREREQUISITE IS NOW BUILT.** A peer that cannot ask *"which
+identity — AND THAT PREREQUISITE IS BUILT BUT NOT DISTRIBUTED.** A peer that cannot ask *"which
 row is mine?"* cannot compare the row to what it wrote, so it cannot run step 4
 at all.
 
-**Corrected 2026-09-09, before this document was merged: `whoami` EXISTS on
-claude-peers and returns this instance's own `id`, `pid`, `cwd`, `git_root`,
-`summary`, `registered_at` and `last_seen`.** An earlier draft of this section
-said a peer could not read its own id and that diagnosis fell back to
-process-tree forensics. **That was true when it was written and is no longer
-true.** A stale *"not built"* is worse than a stale *"done"* — it invites
-somebody to build a second one — so the sentence is replaced rather than
-annotated.
+**Corrected twice, 2026-09-09, before this document was merged.**
+
+**First correction:** an earlier draft said a peer could not read its own id and
+that diagnosis fell back to process-tree forensics. **`whoami` exists** — it
+returns this instance's own `id`, `pid`, `cwd`, `git_root`, `summary`,
+`registered_at` and `last_seen`. A stale *"not built"* is worse than a stale
+*"done"*, since it invites somebody to build a second one, so the sentence was
+replaced rather than annotated.
+
+⚠️ **SECOND CORRECTION, AND THE FIRST ONE WAS OVER-GENERAL IN THE SAME WAY IT
+CRITICISED.** I wrote *"`whoami` EXISTS on claude-peers"* — a claim about the
+network. **It is a claim about MY SESSION.** Two other lanes measured it ABSENT
+from their tool lists, one of them after I had reported it as a portfolio fact.
+
+**Traced to the cause rather than left as "per-session":**
+
+    ~/.claude.json  mcpServers.claude-peers  ->  bun ~/claude-peers-mcp/server.ts
+        that file is dated 2026-07-19, and `whoami` appears NOWHERE in that
+        repository's history (`git log --all -S whoami` -> empty)
+
+    C:/Projects/fam/.mcp.json  claude-peers   ->  bun ./server.ts
+        i.e. FAM's OWN copy of the broker, where `whoami` landed in FAM #35
+        (`9482aad`), present on `origin/main` (5 hits; control: `set_summary`
+        also 5)
+
+⚠️ **SO ONE MCP SERVER NAME RESOLVES TO TWO DIFFERENT IMPLEMENTATIONS, chosen
+by whether the working directory carries a project-level `.mcp.json`.** FAM does,
+because FAM *is* the fork. Every other lane gets the July file.
+
+**It is not version skew and it is not a per-session capability. It is two
+programs with one name** — the same shape `CLAUDE.md` already documents for
+`origin` meaning two different repositories in two checkouts, **and the tell was
+identical both times: a missing entry in a tool list.**
+
+**What this means for the ruling.** CireSnave's *"detection-only in
+claude-peers"* is, for this piece, **already built and simply not distributed**:
+the tool exists in FAM's copy. Giving it to every lane is a configuration or a
+port, not a design. **That is worth knowing before anyone writes it again.**
 
 ⚠️ **AND IT SHIPS WITH A CHEAPER DETECTOR THAN THE PROBE ABOVE, which this
 document should prefer.** Two refinements, both from the tool's own contract:

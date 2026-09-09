@@ -30,35 +30,63 @@ describe('default endpoint configuration', () => {
   // The collision existed because the default was written out by hand in 14
   // places. Fixing the number without fixing the duplication just means the
   // next person reintroduces it in one file and nothing notices.
-  test('no source file hardcodes the broker port as a FAM default', () => {
-    const offenders: string[] = [];
+  //
+  // The walk is hoisted out of the assertion's own test so that a second test
+  // can check it ran. A population built inside the test that consumes it
+  // cannot be examined by anything else.
+  const scanned: string[] = [];
+  const offenders: string[] = [];
 
-    const walk = (dir: string) => {
-      for (const name of readdirSync(dir)) {
-        const path = join(dir, name);
-        if (statSync(path).isDirectory()) {
-          // Tests legitimately mention the broker port (this file names it in a
-          // regex). The rule is about production defaults.
-          if (name === '__tests__') continue;
-          walk(path);
-          continue;
-        }
-        if (!name.endsWith('.ts')) continue;
-        // src/config.ts is where the broker port is deliberately named.
-        if (path.endsWith(`config.ts`) && dir.endsWith('src')) continue;
-
-        const text = readFileSync(path, 'utf-8');
-        text.split('\n').forEach((line, i) => {
-          // Standalone 7899 only — test ports like 17899 are not matches.
-          if (/(?<![0-9])7899(?![0-9])/.test(line)) {
-            offenders.push(`${path}:${i + 1}`);
-          }
-        });
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) {
+        // Tests legitimately mention the broker port (this file names it in a
+        // regex). The rule is about production defaults.
+        if (name === '__tests__') continue;
+        walk(path);
+        continue;
       }
-    };
+      if (!name.endsWith('.ts')) continue;
+      // src/config.ts is where the broker port is deliberately named.
+      if (path.endsWith(`config.ts`) && dir.endsWith('src')) continue;
 
-    walk(join(import.meta.dir, '..'));
+      scanned.push(path);
+      const text = readFileSync(path, 'utf-8');
+      text.split('\n').forEach((line, i) => {
+        // Standalone 7899 only — test ports like 17899 are not matches.
+        if (/(?<![0-9])7899(?![0-9])/.test(line)) {
+          offenders.push(`${path}:${i + 1}`);
+        }
+      });
+    }
+  };
 
+  walk(join(import.meta.dir, '..'));
+
+  // ⚠️ VACUITY GUARD, and it is a separate test on purpose.
+  //
+  // `expect(offenders).toEqual([])` is exactly as green against a walk that
+  // examined 88 files as against one that examined none — measured: pointing
+  // the walk at an empty directory left the file reporting `7 pass, 0 fail`,
+  // indistinguishable from health. The walk root is derived from this file's
+  // own location, so moving or restructuring silently shrinks the population
+  // with nothing to say so.
+  //
+  // Separate rather than folded into the assertion below because the two
+  // failures call for opposite responses — "the sweep is broken" versus "a
+  // source file reintroduced the port" — and two failures needing different
+  // responses must not share a message.
+  //
+  // The floor is far below today's 88 for the reason `gates.ts` gives: one set
+  // near the current count reddens on a legitimate deletion and teaches people
+  // to raise it. It answers "did the walk run", not "did the walk run fully" —
+  // a constant cannot answer the second. See the partial-population issue.
+  test('the walk actually examines source files', () => {
+    expect(scanned.length).toBeGreaterThan(30);
+  });
+
+  test('no source file hardcodes the broker port as a FAM default', () => {
     expect(offenders).toEqual([]);
   });
 });

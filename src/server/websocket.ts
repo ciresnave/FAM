@@ -213,6 +213,64 @@ export class WebSocketManager {
     }
   }
   
+  /**
+   * Close the sockets of sessions that another instance has superseded.
+   *
+   * ⚠️ WITHOUT THIS, EVICTION STOPS REQUESTS AND NOT DELIVERY. A socket is
+   * validated ONCE, in `handleConnection`, and afterwards lives in the maps
+   * below; `pushToEntity` iterates them and revalidates nothing. Measured
+   * before this existed: a superseded instance received a message sent AFTER
+   * its eviction, with the control confirming the instrument could see a
+   * delivery at all.
+   *
+   * That is the one-way break `BROKER-RELIABILITY.md` measured in claude-peers
+   * — dead on the request path, live on the delivery path — reproduced here by
+   * the mechanism written to end duplicate instances.
+   *
+   * ⚠️ AND IT SAYS WHY BEFORE IT CLOSES. A socket that simply drops is
+   * indistinguishable from a network fault, and the client's reconnect logic
+   * treats those as TRANSIENT — so a silent close would put the evicted
+   * instance straight into the retry loop that supersession exists to stop.
+   */
+  disconnectSuperseded(sessionIds: string[]): number {
+    let closed = 0;
+
+    for (const sessionId of sessionIds) {
+      const connection = this.connections.get(sessionId);
+      if (!connection) continue;
+
+      try {
+        this.send(connection.ws, {
+          type: 'message',
+          from: 'system',
+          channel: null,
+          to: connection.entityId,
+          text:
+            'Session superseded: another instance of this entity has claimed the identity. ' +
+            'This process is no longer the holder and should not reconnect under it.',
+          timestamp: new Date().toISOString(),
+          message_id: 0,
+        });
+        connection.ws.close();
+      } catch {
+        // A socket that is already gone needs no closing; the map cleanup below
+        // still has to happen, which is why this is not a `continue`.
+      }
+
+      this.connections.delete(sessionId);
+      const entitySessions = this.entityConnections.get(connection.entityId);
+      if (entitySessions) {
+        entitySessions.delete(sessionId);
+        if (entitySessions.size === 0) {
+          this.entityConnections.delete(connection.entityId);
+        }
+      }
+      closed++;
+    }
+
+    return closed;
+  }
+
   // --------------------------------------------------------------------------
   // Message Sending
   // --------------------------------------------------------------------------

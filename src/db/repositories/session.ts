@@ -99,7 +99,7 @@ export class SessionRepository {
    * is a comment that happens to be executable. A guard whose justification is
    * wrong is one the next reader trusts for the wrong reason.
    */
-  supersedeOtherInstances(entityId: EntityId, instanceId: string): number {
+  supersedeOtherInstances(entityId: EntityId, instanceId: string): string[] {
     const where = `entity_id = ?
        AND instance_id IS NOT NULL
        AND instance_id != ?
@@ -109,7 +109,7 @@ export class SessionRepository {
       .prepare(`SELECT id FROM sessions WHERE ${where}`)
       .all(entityId, instanceId) as Array<{ id: string }>;
 
-    if (rows.length === 0) return 0;
+    if (rows.length === 0) return [];
 
     // ⚠️ MARKED, NOT DELETED. The row is what lets the next request answer
     // "another instance took this identity" instead of "Invalid session".
@@ -117,7 +117,10 @@ export class SessionRepository {
       .prepare(`UPDATE sessions SET superseded_at = datetime('now') WHERE ${where}`)
       .run(entityId, instanceId);
 
-    return rows.length;
+    // ⚠️ THE IDS, NOT A COUNT. The caller has to close these sockets, and a
+    // count cannot say which. Returning only the number is what left eviction
+    // stopping requests while delivery carried on.
+    return rows.map(r => r.id);
   }
 
   // --------------------------------------------------------------------------

@@ -31,6 +31,15 @@ export interface ClaimOutcome {
   generation: number;
   /** How many sessions of other instances were ended by this claim. */
   superseded: number;
+  /**
+   * The session ids that were superseded.
+   *
+   * ⚠️ THE CALLER MUST CLOSE THESE SOCKETS. Marking the rows ends the REQUEST
+   * path only; a WebSocket is validated once at connect and then lives in the
+   * manager's in-memory maps, which nothing revalidates. Returning a count
+   * instead of the ids is what left an evicted instance still receiving pushes.
+   */
+  supersededSessionIds: string[];
 }
 
 interface ClaimRow {
@@ -67,7 +76,7 @@ export function claimIdentity(
       ctx.db
         .prepare("UPDATE entity_claims SET claimed_at = datetime('now') WHERE entity_id = ?")
         .run(entityId);
-      return { generation: current.generation, superseded: 0 };
+      return { generation: current.generation, superseded: 0, supersededSessionIds: [] };
     }
 
     const generation = (current?.generation ?? 0) + 1;
@@ -110,9 +119,13 @@ export function claimIdentity(
     // claim ahead of the evictions rather than behind them. An un-evicted old
     // session is a visible inconsistency the next claim repairs; an eviction
     // with no claim behind it is a session destroyed for no recorded reason.
-    const superseded = ctx.sessions.supersedeOtherInstances(entityId, instanceId);
+    const supersededSessionIds = ctx.sessions.supersedeOtherInstances(entityId, instanceId);
 
-    return { generation, superseded };
+    return {
+      generation,
+      superseded: supersededSessionIds.length,
+      supersededSessionIds,
+    };
   })();
 }
 

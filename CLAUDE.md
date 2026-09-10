@@ -136,20 +136,36 @@ been removed from both checkouts — every configured remote now resolves.
   under whose key" leaves exactly the gap the omission already walked through
   once.
 
-  ⚠️ **The two key custodies are NOT symmetric, and a claim about "signed, so
-  the relay cannot forge it" has to say which.** `POST /entities/encryption-key`
-  accepts a PUBLIC key only, so FAM never holds an X25519 private half —
-  confidentiality from the relay is genuine by construction. But
-  `POST /accounts/create-entity` GENERATES the Ed25519 identity pair
-  server-side (`src/server/routes/accounts.ts`), so **the server held that
-  private key once.** It is not stored, but a server compromised at creation
-  time can keep it and forge that entity's signatures forever.
+  **Both key custodies are now client-side, so confidentiality AND authenticity
+  are unconditional.** `POST /entities/encryption-key` accepts a PUBLIC key
+  only, so FAM never holds an X25519 private half. And
+  `POST /accounts/create-entity` **refuses** a request without a client-supplied
+  `public_key` — *"the entity generates its own Ed25519 key pair and sends the
+  public half. The server no longer mints identity keys"*
+  (`src/server/routes/accounts.ts:231`). `src/adapters/cli/provision.ts:56`
+  generates both pairs locally and transmits neither private half.
 
-  **So: confidentiality is unconditional; authenticity assumes the server was
-  honest when the entity was created.** Do not repeat "a forgery requires a
-  private key" without that clause — the relay was given the key. The fix is
-  client-generated identity keys at creation; it is recorded in
-  `DESIGN-FEDERATION.md` and not yet built.
+  ⚠️ **THIS PARAGRAPH SAID THE OPPOSITE, AND SAID THE FIX WAS "NOT YET BUILT".**
+  It read: *"`POST /accounts/create-entity` GENERATES the Ed25519 identity pair
+  server-side, so the server held that private key once … authenticity assumes
+  the server was honest when the entity was created. The fix is client-generated
+  identity keys at creation; it is recorded in `DESIGN-FEDERATION.md` and not yet
+  built."* **It is built.** Found 2026-09-09 by standing FAM up for the first
+  time: the route rejected an entity-creation request, and the rejection was the
+  correction.
+
+  ⚠️ **A stale "not yet built" is the expensive direction, and this file says so
+  four paragraphs above about a different claim.** It invites the next person to
+  build a second implementation of something that already exists — and with FAM
+  being rewritten into Synapse, the next person is a rewrite. **A stale
+  "done" costs a wasted check; a stale "not built" costs the work.**
+
+  *And note the shape of the refusal, which is the part worth keeping:* the route
+  does not fall back to minting a key when none is supplied. Its own comment
+  rejects that — *"client key if supplied, server key otherwise"* is the
+  disjunction shape, and it would have **silently restored the property being
+  removed** for exactly the callers who had not been updated, which are the ones
+  who would not notice.
 
   **Entity identity keys are Ed25519 and cannot encrypt**, which is why the
   X25519 key exists rather than being reused. Do not reach for the Ed25519→

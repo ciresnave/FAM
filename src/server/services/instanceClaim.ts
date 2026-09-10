@@ -110,10 +110,41 @@ export function claimIdentity(
     // guard with a stated reason is auditable; a guard tuned to a foreign
     // workload is not.
     //
-    // TRIGGER: set the floor when FAM has real restart data. Tracked as #54, and
-    // repeated HERE because the pull request that implements it will close #54 and
-    // take the condition with it — a warning about a fix does not survive in the
-    // artifact that fix closes.
+    // TRIGGER: set the floor when FAM has real restart data. Tracked in the
+    // flap-protection issue, and repeated HERE because a fix that lands takes
+    // the tracking issue with it — a warning about a fix does not survive in
+    // the artifact that fix closes.
+    //
+    // ⚠️ THAT IS NO LONGER A PREDICTION. IT HAPPENED, ON 2026-09-09, TO THIS
+    // COMMENT'S OWN ISSUE, BY THE SENTENCE THAT WARNED ABOUT IT.
+    //
+    // The previous wording here put a closing keyword immediately before the
+    // issue number, in a sentence predicting that a future fix would do the
+    // closing. A development commit message on the branch repeated that
+    // phrasing verbatim. GitHub read the keyword and the number, and issue 54
+    // closed as COMPLETED with flap protection still unimplemented — the state
+    // this comment describes.
+    //
+    // ⚠️ THE ORIGINAL WORDING IS DELIBERATELY NOT QUOTED HERE. The first draft
+    // of this comment reproduced it inside the explanation, which put a live
+    // instance of the hazard into the fix for the hazard. A repo-wide sweep
+    // caught it; re-reading the paragraph three times had not.
+    //
+    // ⚠️ AND THE SURFACE WAS NOT THE ONE ANYONE CHECKS. The pull request body
+    // never mentioned 54 at all; its declared closures were correct. THE
+    // SQUASH COMMIT MESSAGE AGGREGATES EVERY COMMIT MESSAGE ON THE BRANCH, so a
+    // sentence written in a development commit — never reviewed as a closing
+    // declaration — closed an issue at merge time.
+    //
+    // A CLOSING KEYWORD HAS NO TENSE. "will close", "would close" and "must not
+    // close" are all read as "close". So the rule for this file and for any
+    // commit message that quotes it: NEVER PUT A CLOSING KEYWORD NEXT TO AN
+    // ISSUE NUMBER, not even to say it should not happen. Name the issue
+    // without the verb, as above.
+    //
+    // The recovery cost one reopen and one comment, and it cost only that
+    // because this comment exists. The countermeasure did not prevent the
+    // event; it made the event survivable, and those are different things.
 
     // ⚠️ AFTER the claim is written, so a crash between the two leaves the
     // claim ahead of the evictions rather than behind them. An un-evicted old

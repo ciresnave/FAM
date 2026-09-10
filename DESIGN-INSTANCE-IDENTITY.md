@@ -78,7 +78,9 @@ behaviour and exactly why the deliberate mechanism below has to exist.** Landing
 the fix without it would trade a misleading signal for no signal.
 
 ⚠️ **UPDATE — THE FIX LANDED FIRST, AND THE WARNING WENT WITH IT.** #50 merged
-migration 20, and it closed #48, which is where this consequence was recorded.
+migration 20, and issue 48 went with it — which is where this consequence was
+recorded. *(Written without a closing keyword next to the number on purpose: a
+commit message quoting this line would otherwise act on it.)*
 **The repair closed the issue that carried the warning about the repair**, and
 what survived was a comment inside a migration nobody greps plus this document,
 which is still an open PR. The gap is now tracked as **#52**, filed after the

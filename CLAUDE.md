@@ -45,11 +45,34 @@ a route that acts on behalf of an entity, use that helper — do not read
 `entity_id` from the body. `/entities/connect` and `/entities/authenticate` are
 the only exceptions, because they establish the session.
 
-There is exactly ONE session-authentication implementation. Do not add a second
-— an inline check that happens to agree today is a second answer waiting to
-drift. `src/server/__tests__/integration.test.ts` enumerates every registered
-route and fails if any entity-scoped one answers anything but 401 to an
-unauthenticated call, so a new route cannot default into being untested.
+Do not add a session-authentication implementation — an inline check that
+happens to agree today is a second answer waiting to drift.
+
+⚠️ **This paragraph said "There is exactly ONE session-authentication
+implementation" and that was FALSE. There are two, and the second is an inline
+check, and it had already drifted.** `requireEntitySession`
+(`src/server/middleware/auth.ts`) serves every entity-scoped HTTP route. The
+**WebSocket upgrade** in `src/server/http.ts` reads the session table itself and
+decides independently. Measured 2026-09-09 at `66892b59`: the HTTP path
+distinguishes a **superseded** session from an invalid one and says so; the
+upgrade path answered `Invalid session` to both — *the exact defect #53 was
+written to fix, alive one path over, in the branch this sentence said did not
+exist.* Fixed at the site; **the two implementations remain two**, and unifying
+them behind a shared classifier is tracked separately.
+
+*The comment at the upgrade site read "uses the shared server context — single
+source of truth". True of the DATA, and read for weeks as a statement about the
+LOGIC. Sharing a table is not sharing a decision.*
+
+⚠️ **And the enumerator's domain does not cover it.**
+`src/server/__tests__/integration.test.ts` enumerates every registered route and
+fails if an entity-scoped one answers anything but 401 to an unauthenticated
+call, so **a new ROUTE cannot default into being untested.** A WebSocket upgrade
+is not a registered route. `src/server/__tests__/websocketUpgradeAuth.test.ts`
+covers that path instead, and it exists because deleting the upgrade's
+entity-ownership check once left 787 tests passing. **When you add an
+authenticated path that is not a route, the enumerator will not notice; say
+where its guard lives.**
 
 ## Repositories and remotes — READ BEFORE PUSHING
 

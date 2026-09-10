@@ -1,6 +1,7 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
 import { startServer, stopServer } from '../http';
 import { getDatabaseContext } from '../../db';
+import { claimIdentity } from '../services/instanceClaim';
 
 // ============================================================================
 // ⚠️ THE WEBSOCKET UPGRADE'S SESSION-TO-ENTITY BINDING, WHICH NOTHING TESTED.
@@ -53,6 +54,12 @@ let bobSession: string;
 async function upgradeStatus(query: string): Promise<number> {
   const res = await fetch(`${BASE}/ws?${query}`);
   return res.status;
+}
+
+/** The refusal REASON, not only its status. Two refusals can share a code. */
+async function upgradeRefusal(query: string): Promise<{ status: number; body: string }> {
+  const res = await fetch(`${BASE}/ws?${query}`);
+  return { status: res.status, body: await res.text() };
 }
 
 beforeAll(async () => {
@@ -115,6 +122,55 @@ describe('⚠️ /ws — a session may only speak as its OWN entity', () => {
     const status = await upgradeStatus(`entity_id=${ALICE}&session_id=${aliceSession}`);
     expect(status).not.toBe(401);
     expect(status).toBe(500);
+  });
+
+  // ------------------------------------------------------------------
+  // ⚠️ THE DRIFT `CLAUDE.md` PREDICTED, ONE PATH OVER, ALREADY HAPPENED.
+  //
+  // `requireEntitySession` distinguishes a SUPERSEDED session from an invalid
+  // one, because a superseded session is a live client whose identity another
+  // instance took — "Invalid session" sends its operator to check credentials
+  // that were never wrong. That is the defect #53 was written to fix.
+  //
+  // The upgrade handler does its own session lookup and never learned it.
+  // `getById` excludes superseded rows, so a superseded holder falls into the
+  // same branch as a mistyped id and is told the same thing.
+  //
+  // Status stays 401 in both cases on purpose: the MCP client's terminal
+  // classification fires on 401 and a superseded instance must still stop
+  // retrying. ONLY THE REASON WAS MISSING — which is why status-only
+  // assertions could not see this, and every test above asserts status only.
+  // ------------------------------------------------------------------
+
+  test('⚠️ a SUPERSEDED session is told why, not "Invalid session"', async () => {
+    const ctx = getDatabaseContext();
+    const evicted = ctx.sessions.create(ALICE, undefined, 'instance-A');
+    claimIdentity(ctx, ALICE, 'instance-B');
+
+    // The row is gone from the live view and present in the superseded one —
+    // asserted, so a setup that failed to supersede cannot pass this test by
+    // making the session merely absent.
+    expect(ctx.sessions.getById(evicted.id)).toBeNull();
+    expect(ctx.sessions.getSupersededById(evicted.id)).not.toBeNull();
+
+    const { status, body } = await upgradeRefusal(
+      `entity_id=${ALICE}&session_id=${evicted.id}`
+    );
+
+    expect(status).toBe(401);
+    expect(body).toContain('superseded');
+  });
+
+  test('control: a session id that names NOTHING still says "Invalid session"', async () => {
+    // ⚠️ Without this the test above passes against a handler that answers
+    // "superseded" to everything, which would destroy the distinction it exists
+    // to create. The two refusals must differ.
+    const { status, body } = await upgradeRefusal(
+      `entity_id=${ALICE}&session_id=00000000-0000-4000-8000-000000000000`
+    );
+
+    expect(status).toBe(401);
+    expect(body).not.toContain('superseded');
   });
 
   test('control: the matching pair really does open a socket', async () => {

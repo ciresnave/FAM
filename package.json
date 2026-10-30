@@ -1,6 +1,6 @@
 {
   "name": "fam",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Federated Agent Messaging - Agent-framework-agnostic messaging for agents, humans, and tools",
   "module": "index.ts",
   "type": "module",

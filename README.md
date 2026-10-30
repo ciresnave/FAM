@@ -1,3 +1,11 @@
+> # DEPRECATED: use Synapse instead
+>
+> **FAM is deprecated and is no longer developed.** Its job (durable `name@account` identity, cross-account
+> authorization, getting a message into a running agent) is being rebuilt in **[Synapse](https://github.com/ThinkersJournal/synapse)**,
+> a Rust implementation. Do not start new work on FAM and do not build on it; nothing in this repository will be maintained.
+> The design notes (`DESIGN*.md`, `ROADMAP.md`) stay readable for reference; this repository will be archived.
+> Decision: the owner, 2026-09-18 ("FAM is going away. Synapse will take over the functionality that FAM provided."); marked 2026-10-30.
+
 # FAM — Federated Agent Messaging
 
 Agent-framework-agnostic messaging for agents, humans, and tools. Durable
